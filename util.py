@@ -5,6 +5,7 @@ import copy
 from torch.nn import Module
 from torch.nn.functional import avg_pool2d
 from torch.optim import Optimizer
+from torch.optim.lr_scheduler import LRScheduler
 from torch import device
 from torch import Tensor
 import torch
@@ -39,6 +40,18 @@ def mat_corr(mat1:Tensor, mat2:Tensor) -> Tensor:
     """
     return torch.corrcoef(torch.vstack([mat1.flatten(), mat2.flatten()]))[0,1]
 
+def vec_corr(vec1:Tensor, vec2:Tensor) -> Tensor:
+    """Correlation between two vectors.
+
+    Args:
+        vec1 (Tensor): input 1.
+        vec2 (Tensor): input 2. 
+
+    Returns:
+        Tensor: correlation
+    """
+    return torch.corrcoef(torch.vstack([vec1, vec2]))[0,1]
+
 def ignore_diag_plot(mat:ArrayLike, num_diag:int) -> ArrayLike:
     """ignore first few diagonals for plotting purposes.
 
@@ -69,19 +82,21 @@ def diagonal_normalize(mat:ArrayLike) -> ArrayLike:
 
 def train(model:Module,
           optimizer:Optimizer,
+          scheduler:LRScheduler,
           loss:Module,
           data:ArrayLike,
           diag_start:int,
           diag_end:int,
           dev:device=None,
           num_epoch:int=100,
-          parameter_lower_bound:float=1e-5,
+          parameter_lower_bound:float=1e-9,
           parameter_upper_bound:float=1.0) -> Tuple[Module, Module, ArrayLike, ArrayLike]:
     """Train diagonal model.
 
     Args:
         model (Module): DLEM type of model
         optimizer (Optimizer): any optimizer. For example ADAM.
+        scheduler (LRScheduler): learning rate scheduler. For example plateau scheduler.
         loss (Module): a loss function. For example MSE.
         data (ArrayLike): patch.
         diag_start (int): starting diagonal index.
@@ -110,15 +125,20 @@ def train(model:Module,
     arr_loss = []
     model = model.to(dev)
 
+    mask = torch.ones_like(data, dtype=bool)
+    train_ii = torch.where(
+        torch.tril(torch.triu(mask, 3), 5) + torch.triu(torch.tril(mask, -3), -5)
+    )
+
     for e in range(num_epoch):
         optimizer.zero_grad()
         loss_total = 0
         pred_map = model.contact_map_prediction(init_diag)
-        curr_cor = mat_corr(pred_map, data)
+        curr_cor = mat_corr(pred_map[train_ii], data[train_ii])
         arr_corr.append(curr_cor.detach().cpu().numpy())
         for diag_i in range(diag_start, diag_end):
             pred = model(data.diag(diag_i), diag_i, True)
-            loss_total += loss(pred, data.diag(diag_i+1))
+            loss_total += loss(pred, torch.log(data.diag(diag_i+1)))
         if loss_total < best_loss:
             best_loss = loss_total
             best_loss_model = copy.deepcopy(model)
@@ -128,6 +148,7 @@ def train(model:Module,
         loss_total.backward()
         optimizer.step()
         arr_loss.append(loss_total.detach().cpu().numpy())
+        scheduler.step(curr_cor)
 
         model.project_to_constraints(parameter_lower_bound, parameter_upper_bound)
         print(f'{int((e+1)/num_epoch*100):3}/100: '
@@ -137,7 +158,7 @@ def train(model:Module,
 
     return best_loss_model, best_corr_model, np.array(arr_loss), np.array(arr_corr)
 
-def plot_pred_data_on_same_ax(mat:ArrayLike, diag_ignore:int, ax:Any):
+def plot_pred_data_on_same_ax(mat:ArrayLike, diag_ignore:int, diag_ignore_off:int, ax:Any):
     """Plot prediction and data on the same ax but with different color schemes.
 
     Args:
@@ -148,8 +169,8 @@ def plot_pred_data_on_same_ax(mat:ArrayLike, diag_ignore:int, ax:Any):
     """
 
     # Create masks for plotting
-    mask_upper = np.triu(np.ones_like(mat, dtype=bool), diag_ignore)
-    mask_lower = np.tril(np.ones_like(mat, dtype=bool), -diag_ignore)
+    mask_upper = np.tril(np.triu(np.ones_like(mat, dtype=bool), diag_ignore), diag_ignore_off-1)
+    mask_lower = np.triu(np.tril(np.ones_like(mat, dtype=bool), -diag_ignore), -diag_ignore_off+1)
 
     mat_upper = np.ma.masked_where(~mask_upper, mat)
     mat_lower = np.ma.masked_where(~mask_lower, mat)
@@ -164,7 +185,7 @@ def plot_pred_data_on_same_ax(mat:ArrayLike, diag_ignore:int, ax:Any):
 
 
 def plot_results(patch:ArrayLike, pred:ArrayLike,
-                 params:Tuple, axes:Any=None, ignore_i:int=3,
+                 params:Tuple, axes:Any=None, ignore_i:int=3, ignore_i_off:Union[int,None]=None,
                  start:Union[int,None]=None, end:Union[int,None]=None):
     """Plot results of the fit.
 
@@ -181,6 +202,8 @@ def plot_results(patch:ArrayLike, pred:ArrayLike,
         start = 0
     if end is None:
         end = patch.shape[0]
+    if ignore_i_off is None:
+        ignore_i_off = int(np.floor(patch.shape[0]*0.3))
 
     plot_mat = np.triu(patch) + np.triu(pred, 1).T
     if axes is None:
@@ -195,6 +218,6 @@ def plot_results(patch:ArrayLike, pred:ArrayLike,
     axes[2, 1].remove()
     axes[0, 0].plot(np.arange(end-start), params[1][start:end])
     #axes[1, 0].matshow(plot_mat[start:end, start:end], cmap="icefire")
-    plot_pred_data_on_same_ax(plot_mat, ignore_i, axes[1, 0])
+    plot_pred_data_on_same_ax(plot_mat, ignore_i, ignore_i_off, axes[1, 0])
     axes[1, 1].plot(params[0][start:end], np.arange(end-start))
     axes[2, 0].plot(np.arange(end-start), params[2][start:end])

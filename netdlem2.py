@@ -12,8 +12,7 @@ class DLEM(Module):
     def __init__(self, left_init:ArrayLike,
                        right_init:ArrayLike,
                        unload_init:float=0.95,
-                       free_unload:bool=False,
-                       eps:float=1e-4):
+                       free_unload:bool=False):
         """_summary_
 
         Args:
@@ -26,7 +25,6 @@ class DLEM(Module):
         super(DLEM, self).__init__()
         self.const = Parameter(torch.tensor(0.99), requires_grad = True)
         self.n = len(left_init)
-        self.eps = Parameter(torch.tensor(eps, requires_grad = False), requires_grad = True)
         self.left = Parameter(left_init, requires_grad=True)
         self.right = Parameter(right_init, requires_grad=True)
         self.unload = Parameter(torch.ones_like(left_init) * unload_init, requires_grad=free_unload)
