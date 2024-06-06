@@ -97,6 +97,7 @@ class DLEM(Module):
         with torch.no_grad():
             self.right.clamp_(lower, upper)
             self.left.clamp_(lower, upper)
+            self.unload.clamp_(lower, upper)
 
     def return_parameters(self) -> Tuple[ArrayLike,ArrayLike,ArrayLike]:
         """Return model parameters as a tuple.
