@@ -127,7 +127,8 @@ def train(model:Module,
 
     mask = torch.ones_like(data, dtype=bool)
     train_ii = torch.where(
-        torch.tril(torch.triu(mask, 3), 5) + torch.triu(torch.tril(mask, -3), -5)
+        torch.tril(torch.triu(mask, diag_start),
+                   diag_end) + torch.triu(torch.tril(mask, -diag_start), -diag_end)
     )
 
     for e in range(num_epoch):
