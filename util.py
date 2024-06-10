@@ -222,3 +222,84 @@ def plot_results(patch:ArrayLike, pred:ArrayLike,
     plot_pred_data_on_same_ax(plot_mat, ignore_i, ignore_i_off, axes[1, 0])
     axes[1, 1].plot(params[0][start:end], np.arange(end-start))
     axes[2, 0].plot(np.arange(end-start), params[2][start:end])
+
+def train_w_signal(model:Module,
+                   optimizer:Optimizer,
+                   scheduler:LRScheduler,
+                   loss:Module,
+                   data:ArrayLike,
+                   sig:ArrayLike,
+                   diag_start:int,
+                   diag_end:int,
+                   dev:device=None,
+                   num_epoch:int=100) -> Tuple[Module, Module, ArrayLike, ArrayLike]:
+    """Train diagonal model.
+
+    Args:
+        model (Module): DLEM type of model
+        optimizer (Optimizer): any optimizer. For example ADAM.
+        scheduler (LRScheduler): learning rate scheduler. For example plateau scheduler.
+        loss (Module): a loss function. For example MSE.
+        data (ArrayLike): patch.
+        diag_start (int): starting diagonal index.
+        diag_end (int): stopping diagonal index.
+        dev (device, optional): device if None then gpu if cuda is avaible, cpu otherwise.
+        Defaults to None.
+        num_epoch (int, optional): Number of epochs. Defaults to 100.
+        parameter_lower_bound (float, optional): constrain the parameters. Lower limit.
+        Defaults to 1e-5.
+        parameter_upper_bound (float, optional): constrain the parameters. Upper limit.
+        Defaults to 1.0.
+
+    Returns:
+        (Module, Module, ArrayLike, ArrayLike) : the best model in terms of loss
+                                                 the best model in terms of correlation
+                                                 the trajectory of loss
+                                                 the trajectory of correlation
+    """
+
+    def get_diags(mat, i):
+        return torch.diagonal(mat,i,dim1=-2,dim2=-1)
+
+    data = torch.tensor(data).to(dev)
+    init_diag = torch.ones((1, data.shape[1])) * data.shape[1]
+    init_diag = init_diag.to(dev)
+    best_corr = 0
+    arr_corr = []
+    best_loss = torch.inf
+    arr_loss = []
+    model = model.to(dev)
+    sig = sig.to(dev)
+
+    mask = torch.ones_like(data, dtype=bool)
+    train_ii = torch.where(
+        torch.tril(torch.triu(mask, diag_start),
+                   diag_end) + torch.triu(torch.tril(mask, -diag_start), -diag_end)
+    )
+
+    for e in range(num_epoch):
+        optimizer.zero_grad()
+        loss_total = 0
+        pred_map = model.contact_map_prediction(sig, init_diag)
+        curr_cor = mat_corr(pred_map[train_ii], data[train_ii])
+        arr_corr.append(curr_cor.detach().cpu().numpy())
+        for diag_i in range(diag_start, diag_end):
+            pred = model(sig, get_diags(data, diag_i), diag_i, True)
+            loss_total += loss(pred, torch.log(get_diags(data, diag_i+1)))
+        if loss_total < best_loss:
+            best_loss = loss_total
+            best_loss_model = copy.deepcopy(model)
+        if curr_cor > best_corr:
+            best_corr = curr_cor
+            best_corr_model = copy.deepcopy(model)
+        loss_total.backward()
+        optimizer.step()
+        arr_loss.append(loss_total.detach().cpu().numpy())
+        scheduler.step(curr_cor)
+
+        print(f'{int((e+1)/num_epoch*100):3}/100: '
+              f'correlation = {curr_cor:.3f}, '
+              f'loss = {loss_total:.3f}',
+              flush=True, end='\r')
+
+    return best_loss_model, best_corr_model, np.array(arr_loss), np.array(arr_corr)
