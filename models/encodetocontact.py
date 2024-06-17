@@ -9,7 +9,8 @@ from numpy.typing import ArrayLike
 class DLEM(Module):
     """Predict contact map from Encode signals.
     """
-    def __init__(self, dim_num:int,
+    def __init__(self, n:int,
+                       dim_num:int,
                        unload_init:float=0.95,
                        free_unload:bool=False):
         """_summary_
@@ -39,7 +40,7 @@ class DLEM(Module):
             Conv1d(in_channels=10, out_channels=2, kernel_size=1),
             Sigmoid()
         )
-        self.n = 100
+        self.n = n 
         self.unload = Parameter(torch.ones(self.n) * unload_init, requires_grad=free_unload)
         self.const = Parameter(torch.tensor(0.99), requires_grad = True)
 
