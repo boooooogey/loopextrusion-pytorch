@@ -1,18 +1,18 @@
 """Implementation of DLEM with pytorch
 """
 from typing import Tuple
-from functools import partial
-from torch.nn import Module, Parameter, Sequential, Linear, ReLU, Sigmoid, Conv1d, ConvTranspose1d
-import torch
 from numpy.typing import ArrayLike
+import torch
+from torch.nn import Module, Parameter, Sequential, ReLU, Sigmoid, Conv1d, ConvTranspose1d
+import util
 
 class DLEM(Module):
     """Predict contact map from Encode signals.
     """
     def __init__(self, n:int,
                        dim_num:int,
-                       unload_init:float=0.95,
-                       free_unload:bool=False):
+                       start_diag:int,
+                       stop_diag:int):
         """_summary_
 
         Args:
@@ -52,6 +52,9 @@ class DLEM(Module):
         self.n = n
         #self.unload = Parameter(torch.ones(self.n) * unload_init, requires_grad=free_unload)
         self.const = Parameter(torch.tensor(0.99), requires_grad = True)
+        self.start_diag = start_diag
+        self.stop_diag = stop_diag
+        self.indexing = util.diag_index_for_mat(n, start_diag, stop_diag)
 
     def forward(self,
                 signal:ArrayLike,
@@ -99,7 +102,9 @@ class DLEM(Module):
 
         return next_diag_pred
 
-    def contact_map_prediction(self, signal:ArrayLike, init_mass:ArrayLike) -> ArrayLike:
+    def contact_map_prediction(self,
+                               signal:ArrayLike,
+                               init_mass:ArrayLike) -> ArrayLike:
         """Produce the contact map
 
         Args:
@@ -108,26 +113,18 @@ class DLEM(Module):
         Returns:
             ArrayLike: predicted contact mass.
         """
-        index_diag = self.n - init_mass.shape[1]
-        out = torch.diag_embed(init_mass, offset=index_diag)
+        start_diag, stop_diag = self.start_diag, self.stop_diag
         curr_diag = init_mass
+        out_len = int((self.n - (stop_diag + start_diag - 1)/2) * (stop_diag-start_diag))
+        out = torch.zeros((signal.shape[0], out_len))
         with torch.no_grad():
-            for diag in range(index_diag, self.n-1):
+            for diag in range(self.stop_diag-1):
                 curr_diag = self.forward(signal, curr_diag, diag, transform=False)
-                out = out + torch.diag_embed(curr_diag, offset=diag+1)
-        return out + torch.transpose(torch.triu(out, 1), -1,-2)
-
-    #def project_to_constraints(self, lower:float, upper:float) -> None:
-    #    """Project the parameters onto [lower, upper]
-
-    #    Args:
-    #        lower (float): region's lower bound
-    #        upper (float): region's upper bound
-    #    """
-    #    with torch.no_grad():
-    #        self.right.clamp_(lower, upper)
-    #        self.left.clamp_(lower, upper)
-    #        self.unload.clamp_(lower, upper)
+                if diag >= self.start_diag-1:
+                    normed_diag = torch.log(curr_diag)
+                    normed_diag = normed_diag - normed_diag.mean(axis=1)[:, None]
+                    out[:, self.indexing(diag+1)] = normed_diag
+        return out
 
     def return_parameters(self, signal:ArrayLike) -> Tuple[ArrayLike,ArrayLike,ArrayLike]:
         """Return model parameters as a tuple.

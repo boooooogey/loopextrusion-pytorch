@@ -1,4 +1,5 @@
 from encode_to_contact_utils import run_experiment
+import os
 
 def patch_loop(main_folder, start_init, patch_num, resolution, patch_size, chromosome, mode):
     start = start_init

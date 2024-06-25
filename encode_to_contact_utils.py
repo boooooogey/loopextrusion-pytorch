@@ -1,6 +1,7 @@
 import numpy as np
 import os, sys
 from numpy.typing import ArrayLike
+from typing import Any
 from torch import optim
 from typing import Tuple
 import pandas as pd
@@ -31,7 +32,7 @@ def plot_map_diff(map1, map2, signal1d1, signal1d2, label1, label2, color_lookup
                                gridspec_kw={'wspace':0,
                                            'hspace':0,
                                            'height_ratios':[1,2]})
-    for i, map in enumerate([map1, map2, np.abs(map1 - map2)]):
+    for i, map in enumerate([map1, map2, map1 - map2]):
         axes[1,i].matshow(map, cmap="icefire")
         axes[1,i].xaxis.set_ticks_position('bottom')
         axes[1,i].xaxis.set_label_position('bottom')
@@ -56,17 +57,19 @@ def return_model_result(model, encode):
         p_r = params[0,1,:]
     return pred, p_l, p_r
 
-def plot_results_comp_train_val(model, cmap_train, cmap_val, encode_train, encode_val, diag_stop):
+def plot_results_comp_train_val(model, cmap_train, cmap_val, encode_train, encode_val, diag_stop,
+                                axes = None):
     pred_train, p_l_train, p_r_train = return_model_result(model, encode_train[None])
     pred_val, p_l_val, p_r_val = return_model_result(model, encode_val[None])
 
-    _, axes = plt.subplots(nrows=3, ncols=6, figsize=(12 * 3,14),
-                            sharex='col',
-                            sharey='row',
-                            gridspec_kw={'wspace':0,
-                                        'hspace':0,
-                                        'height_ratios':[10, 50, 10],
-                                        'width_ratios':[50, 10]*3})
+    if axes is None:
+        _, axes = plt.subplots(nrows=3, ncols=6, figsize=(12 * 3,14),
+                                sharex='col',
+                                sharey='row',
+                                gridspec_kw={'wspace':0,
+                                            'hspace':0,
+                                            'height_ratios':[10, 50, 10],
+                                            'width_ratios':[50, 10]*3})
 
     plot_results(cmap_train,
                  pred_train,
@@ -76,8 +79,8 @@ def plot_results_comp_train_val(model, cmap_train, cmap_val, encode_train, encod
                  pred_val,
                  (p_l_val, p_r_val, np.ones_like(p_l_val)),
                  ignore_i_off=diag_stop, axes=axes[:,2:4])
-    plot_results(np.abs(cmap_val - cmap_train),
-                 np.abs(pred_val - pred_train),
+    plot_results(cmap_val - cmap_train,
+                 pred_val - pred_train,
                  (p_l_val, p_r_val, np.ones_like(p_l_val)),
                  ignore_i_off=diag_stop, axes=axes[:,4:])
     for i in range(6):
@@ -278,7 +281,7 @@ def run_training(map_train,
         model,
         optimizer,
         scheduler,
-        torch.nn.MSELoss(reduction="sum"),
+        torch.nn.MSELoss(reduction="mean"),
         torch.exp(map_train).to(dev),
         torch.exp(map_val).to(dev),
         encode_train.to(dev),
@@ -338,3 +341,16 @@ def run_experiment(mode, chromosome, start, stop, resolution, folder):
     plot_metrics(arr_loss, arr_corr)
     plt.savefig(os.path.join(folder, "metrics.png"))
     plt.close()
+
+def read_model(path:str, *arg:Any) -> torch.nn.Module:
+    """Read pytorch models from given path.
+
+    Args:
+        path (str): path to saved model.
+
+    Returns:
+        torch.nn.Module: DLEM model
+    """
+    model = DLEM(*arg)
+    model.load_state_dict(torch.load(path))
+    return model

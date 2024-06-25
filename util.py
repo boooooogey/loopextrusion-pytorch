@@ -13,6 +13,9 @@ from numpy.typing import ArrayLike
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.colors import Normalize
+from IPython.display import display, clear_output
+import json
+
 
 def get_diags(mat:ArrayLike, i:int) -> ArrayLike:
     """return diagonal from batched matrices.
@@ -91,7 +94,7 @@ def diagonal_normalize(mat:ArrayLike) -> ArrayLike:
     out = torch.zeros_like(mat)
     for i in range(mat.shape[1]):
         diag_i = get_diags(mat, i)
-        out += torch.diag_embed(diag_i - torch.mean(diag_i, axis=1), i)
+        out += torch.diag_embed(diag_i - torch.mean(diag_i, axis=1)[:,None], i)
     return out + torch.triu(out, 1).transpose(-2,-1)
 
 def diagonal_region_indices_from(mat:ArrayLike,
@@ -189,7 +192,10 @@ def train(model:Module,
 
     return best_loss_model, best_corr_model, np.array(arr_loss), np.array(arr_corr)
 
-def plot_pred_data_on_same_ax(mat:ArrayLike, diag_ignore:int, diag_ignore_off:int, ax:Any):
+def plot_pred_data_on_same_ax(mat:ArrayLike,
+                              diag_ignore:int,
+                              diag_ignore_off:int,
+                              ax:Any, cmap=None):
     """Plot prediction and data on the same ax but with different color schemes.
 
     Args:
@@ -211,8 +217,8 @@ def plot_pred_data_on_same_ax(mat:ArrayLike, diag_ignore:int, diag_ignore_off:in
     norm_lower = Normalize(vmin=mat_lower.min(), vmax=mat_lower.max())
 
     # Plot the matrix
-    ax.imshow(mat_upper, cmap="icefire", norm=norm_upper)
-    ax.imshow(mat_lower, cmap="icefire", norm=norm_lower)
+    ax.imshow(mat_upper, cmap=cmap, norm=norm_upper)
+    ax.imshow(mat_lower, cmap=cmap, norm=norm_lower)
 
 
 def plot_results(patch:ArrayLike, pred:ArrayLike,
@@ -385,6 +391,28 @@ def train_w_signal_tracking_diff(
 
     train_ii = diagonal_region_indices_from(data, diag_start, diag_end)
 
+    # Turn on interactive mode
+    plt.ion()
+
+    # Create the figure and axes objects
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(8, 5), sharex="col")
+
+    # Initialize lines for updating the plots
+    loss_line, = ax1.plot([], [], label='Loss')
+    correlation_line, = ax2.plot([], [], color='orange', label='Correlation')
+
+    # Set up the plot parameters
+    #ax1.set_xlabel('Epoch')
+    ax1.set_ylabel('Loss')
+    #ax1.set_title('Training Loss Over Time')
+    ax1.legend()
+
+    ax2.set_xlabel('Epoch')
+    ax2.set_ylabel('Correlation')
+    #ax2.set_title('Training Correlation Over Time')
+    ax2.legend()
+    display(fig)
+
     try:
         for e in range(num_epoch):
             curr_lr = scheduler.get_last_lr()[-1]
@@ -397,8 +425,8 @@ def train_w_signal_tracking_diff(
                 pred_map = torch.exp(diagonal_normalize(torch.log(pred_map)))
                 pred_map_heldout = model.contact_map_prediction(sig_heldout, init_diag)
                 pred_map_heldout = torch.exp(diagonal_normalize(torch.log(pred_map_heldout)))
-                curr_cor = mat_corr(torch.abs(pred_map[train_ii] - pred_map_heldout[train_ii]),
-                                    torch.abs(data[train_ii] - heldout[train_ii]))
+                curr_cor = mat_corr(pred_map[train_ii] - pred_map_heldout[train_ii],
+                                    data[train_ii] - heldout[train_ii])
             arr_corr.append(curr_cor.detach().cpu().numpy())
             for diag_i in range(diag_start, diag_end):
                 pred = model(sig, get_diags(data, diag_i), diag_i, True)
@@ -418,9 +446,138 @@ def train_w_signal_tracking_diff(
                 f'correlation = {curr_cor:.3f}, '
                 f'loss = {loss_total:.3f}',
                 flush=True, end='\r')
+
+                # Update the data of the plot lines
+            if e%100 == 0:
+                loss_line.set_data(range(len(arr_loss)), arr_loss)
+                correlation_line.set_data(range(len(arr_corr)), arr_corr)
+
+                # Adjust the limits of the plots to fit the data
+                ax1.set_xlim(0, len(arr_loss))
+                ax1.set_ylim(min(arr_loss), max(arr_loss))
+
+                ax2.set_xlim(0, len(arr_corr))
+                ax2.set_ylim(min(arr_corr), max(arr_corr))
+
+                # Redraw the figure to update the display
+                fig.canvas.draw()
+                fig.canvas.flush_events()
+                clear_output(wait=True)
+                display(fig)
         print()
+
     except KeyboardInterrupt:
         print()
-        print("Interruption: returning the current best models!") 
+        print("Interruption: returning the current best models!")
+
+    finally:
+        plt.ioff()
+        plt.show()
 
     return best_loss_model, best_corr_model, np.array(arr_loss), np.array(arr_corr)
+
+def read_json(path:str) -> dict:
+    """read the content of a json file and return it as a dictionary.
+
+    Args:
+        path (str): path to json file.
+
+    Returns:
+        dict: dictionary of the content within the json file.
+    """
+    with open(path, "r", encoding="utf-8") as file:
+        meta = json.loads(file.read())
+    return meta
+
+def flip_diag_row(mat:ArrayLike) -> ArrayLike:
+    """Swap row and diagonal elements of a given matrix.
+
+    Args:
+        mat (ArrayLike): given matrix.
+
+    Returns:
+        ArrayLike: row diagonal swapped matrix. 
+    """
+    n = mat.shape[0]
+    ii = np.arange(n)
+    iy = ii.reshape(1,-1) * np.ones(n).reshape(-1,1)
+    ix = (ii[::-1].reshape(-1,1) - ii[::-1].reshape(1,-1)) % n
+    return mat[ix.astype(int), iy.astype(int)]
+
+
+def diag_indices_in_flipped(mat:ArrayLike,
+                            on_diag:int,
+                            off_diag:int) -> Tuple[ArrayLike, ArrayLike]:
+    """Return the indices for the diagonal in a flipped matrix.
+
+    Args:
+        mat (ArrayLike): reference matrix.
+        on_diag (int): start diagonal.
+        off_diag (int): stop diagonal.
+
+    Returns:
+        Tuple[ArrayLike, ArrayLike]: indices for the diagonals.
+    """
+    return np.where(flip_diag_row(np.tril(np.triu(np.ones_like(mat,dtype=bool),
+                                                  on_diag),
+                                          off_diag-1)
+                                 )
+                   )
+
+def diag_indices(mat:ArrayLike,
+                 on_diag:int,
+                 off_diag:int) -> Tuple[ArrayLike, ArrayLike]:
+    """Return the indices for the diagonal in a matrix.
+
+    Args:
+        mat (ArrayLike): reference matrix.
+        on_diag (int): start diagonal.
+        off_diag (int): stop diagonal.
+
+    Returns:
+        Tuple[ArrayLike, ArrayLike]: indices for the diagonals.
+    """
+    return np.where(np.tril(np.triu(np.ones_like(mat,dtype=bool),
+                                    on_diag),
+                            off_diag-1)
+                    
+                   )
+
+def convert_diags_to_full_contact(diagonals:ArrayLike, start_diag:int, stop_diag:int) -> ArrayLike:
+    """Convert diagonals to contact map.
+
+    Args:
+        diagonals (ArrayLike): array of the diagonals.
+        start_diag (int): start diagonal. 
+        stop_diag (int): stop diagonal. 
+
+    Returns:
+        ArrayLike: contact matrix.
+    """
+    patch_size = int(len(diagonals)/(stop_diag-start_diag)+(stop_diag+start_diag-1)/2)
+    out = np.full((patch_size, patch_size), np.nan)
+    out[diag_indices_in_flipped(out, start_diag, stop_diag)] = diagonals
+    return flip_diag_row(out)
+
+def diag_index_for_mat(size:int, start_diag:int, stop_diag:int) -> callable:
+    """Return function that helps with indexing the diagonals in the flatten version
+
+    Args:
+        size (int): length of the one dimension of contact map.
+        start_diag (int): start diagonal. 
+        stop_diag (int): stop diagonal. 
+
+    Returns:
+        callable: indexing matrix.
+    """
+    def indexing(index):
+        if index < start_diag:
+            raise IndexError("Target window for diagonals starts with {start_diag}th diagonal.")
+        if index >= stop_diag:
+            raise IndexError("Target window for diagonals stops at {stop_diag}th diagonal.")
+        largest_diagonal = size - start_diag
+        offset = index - start_diag
+        start_index = largest_diagonal*offset - (offset)*(offset-1)/2
+        end_index = start_index + largest_diagonal - offset
+        return range(int(start_index), int(end_index))
+    return indexing

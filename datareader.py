@@ -1,0 +1,67 @@
+"""
+Data loader implementation for DLEM data.
+"""
+import os
+import pandas as pd
+from typing import Tuple
+import numpy as np
+import torch
+from numpy.typing import ArrayLike
+import util
+
+class DLEMDataset(torch.utils.data.Dataset):
+    """DLEM dataset to interface data batching and reading.
+    """
+    def __init__(self, path:str) -> None:
+        """
+        Args:
+            path (str): Dataset folder path.
+        """
+        self.json_path = path
+        self.args = util.read_json(os.path.join(path, 'meta.json'))
+        self.patches = np.memmap(os.path.join(path, 'contactmaps.dat'),
+                                 dtype='float32',
+                                 mode = 'r',
+                                 shape=(self.args['SAMPLE_NUM'], self.args['PATCH_LEN']))
+
+        self.tracks = np.memmap(os.path.join(path, 'features.dat'),
+                                dtype='float32',
+                                mode = 'r',
+                                shape=(self.args['SAMPLE_NUM'],
+                                       self.args['FEA_DIM'],
+                                       self.args['PATCH_DIM'])
+        )
+        self.folds = pd.read_csv(os.path.join(path, "sequences.bed"),
+                                 sep="\t",
+                                 header=None).iloc[:,3].to_numpy()
+
+    def __getitem__(self, index:int) -> Tuple[ArrayLike, ArrayLike]:
+        return np.array(self.patches[index]), np.array(self.tracks[index])
+
+    def __len__(self)->int:
+        return int(self.args["SAMPLE_NUM"])
+
+    @property
+    def stop_diag(self) -> int:
+        """return stop diagonal"""
+        return int(self.args["STOP_DIAG"])
+
+    @property
+    def start_diag(self) -> int:
+        """return start diagonal"""
+        return int(self.args["START_DIAG"])
+
+    @property
+    def data_folds(self) -> ArrayLike:
+        """return folds"""
+        return self.folds
+
+    @property
+    def patch_dim(self) -> ArrayLike:
+        """return folds"""
+        return int(self.args['PATCH_DIM'])
+
+    @property
+    def feature_dim(self) -> ArrayLike:
+        """return folds"""
+        return int(self.args['FEA_DIM'])
