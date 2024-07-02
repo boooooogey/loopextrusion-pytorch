@@ -74,7 +74,7 @@ class DLEM(Module):
         """
         diag_len, n = curr_diag.shape[1], self.n
 
-        left_right = self.converter(signal.transpose(-2,-1))
+        left_right = self.converter(signal)
         left = left_right[:, 0, :]
         right = left_right[:, 1, :]
         #unload = left_right[:, 2, :]
@@ -116,7 +116,7 @@ class DLEM(Module):
         start_diag, stop_diag = self.start_diag, self.stop_diag
         curr_diag = init_mass
         out_len = int((self.n - (stop_diag + start_diag - 1)/2) * (stop_diag-start_diag))
-        out = torch.zeros((signal.shape[0], out_len))
+        out = torch.zeros((signal.shape[0], out_len), device=signal.device)
         with torch.no_grad():
             for diag in range(self.stop_diag-1):
                 curr_diag = self.forward(signal, curr_diag, diag, transform=False)
@@ -133,7 +133,7 @@ class DLEM(Module):
             Tuple[ArrayLike,ArrayLike,ArrayLike]: parameters 
         """
         left_right = self.converter(signal)
-        left = left_right[:, :, 0]
-        right = left_right[:, :, 1]
+        left = left_right[:, 0, :]
+        right = left_right[:, 1, :]
         return (left.detach().cpu().numpy(),
                 right.detach().cpu().numpy())

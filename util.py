@@ -2,6 +2,7 @@
 """
 from typing import Any, Tuple, Union, List
 import copy
+import pandas as pd
 from torch.nn import Module
 from torch.nn.functional import avg_pool2d
 from torch.optim import Optimizer
@@ -223,7 +224,8 @@ def plot_pred_data_on_same_ax(mat:ArrayLike,
 
 def plot_results(patch:ArrayLike, pred:ArrayLike,
                  params:Tuple, axes:Any=None, ignore_i:int=3, ignore_i_off:Union[int,None]=None,
-                 start:Union[int,None]=None, end:Union[int,None]=None):
+                 start:Union[int,None]=None, end:Union[int,None]=None, cmap=None,
+                 scale:float=1.0):
     """Plot results of the fit.
 
     Args:
@@ -244,20 +246,20 @@ def plot_results(patch:ArrayLike, pred:ArrayLike,
 
     plot_mat = np.triu(patch) + np.triu(pred, 1).T
     if axes is None:
-        _, axes = plt.subplots(nrows=3, ncols=2, figsize=(12,14),
+        _, axes = plt.subplots(nrows=2, ncols=2, figsize=(12*scale,12*scale),
                                sharex='col',
                                sharey='row',
                                gridspec_kw={'wspace':0,
                                            'hspace':0,
-                                           'height_ratios':[10, 50, 10],
-                                           'width_ratios':[50, 10]})
+                                           'height_ratios':[1, 5],
+                                           'width_ratios':[5, 1]})
     axes[0, 1].remove()
-    axes[2, 1].remove()
+    #axes[2, 1].remove()
     axes[0, 0].plot(np.arange(end-start), params[1][start:end])
     #axes[1, 0].matshow(plot_mat[start:end, start:end], cmap="icefire")
-    plot_pred_data_on_same_ax(plot_mat, ignore_i, ignore_i_off, axes[1, 0])
+    plot_pred_data_on_same_ax(plot_mat, ignore_i, ignore_i_off, axes[1, 0], cmap=cmap)
     axes[1, 1].plot(params[0][start:end], np.arange(end-start))
-    axes[2, 0].plot(np.arange(end-start), params[2][start:end])
+    #axes[2, 0].plot(np.arange(end-start), params[2][start:end])
 
 def train_w_signal(model:Module,
                    optimizer:Optimizer,
@@ -519,29 +521,36 @@ def diag_indices_in_flipped(mat:ArrayLike,
         Tuple[ArrayLike, ArrayLike]: indices for the diagonals.
     """
     return np.where(flip_diag_row(np.tril(np.triu(np.ones_like(mat,dtype=bool),
-                                                  on_diag),
-                                          off_diag-1)
-                                 )
-                   )
+                                                on_diag),
+                                        off_diag-1)
+                                )
+                )
 
 def diag_indices(mat:ArrayLike,
                  on_diag:int,
-                 off_diag:int) -> Tuple[ArrayLike, ArrayLike]:
+                 off_diag:int,
+                 tril:bool=False) -> Tuple[ArrayLike, ArrayLike]:
     """Return the indices for the diagonal in a matrix.
 
     Args:
         mat (ArrayLike): reference matrix.
         on_diag (int): start diagonal.
         off_diag (int): stop diagonal.
+        tril (bool): return the indices in lower triangle.
 
     Returns:
         Tuple[ArrayLike, ArrayLike]: indices for the diagonals.
     """
-    return np.where(np.tril(np.triu(np.ones_like(mat,dtype=bool),
-                                    on_diag),
-                            off_diag-1)
-                    
-                   )
+    if tril:
+        return np.where(np.tril(np.triu(np.ones_like(mat,dtype=bool),
+                                        on_diag),
+                                off_diag-1).T
+                       )
+    else:
+        return np.where(np.tril(np.triu(np.ones_like(mat,dtype=bool),
+                                        on_diag),
+                                off_diag-1)
+                       )
 
 def convert_diags_to_full_contact(diagonals:ArrayLike, start_diag:int, stop_diag:int) -> ArrayLike:
     """Convert diagonals to contact map.
@@ -556,8 +565,12 @@ def convert_diags_to_full_contact(diagonals:ArrayLike, start_diag:int, stop_diag
     """
     patch_size = int(len(diagonals)/(stop_diag-start_diag)+(stop_diag+start_diag-1)/2)
     out = np.full((patch_size, patch_size), np.nan)
-    out[diag_indices_in_flipped(out, start_diag, stop_diag)] = diagonals
-    return flip_diag_row(out)
+    triu_ii = diag_indices_in_flipped(out, start_diag, stop_diag)
+    tril_ii = diag_indices(out, start_diag, stop_diag, tril=True)
+    out[triu_ii] = diagonals
+    out = flip_diag_row(out)
+    out[tril_ii] = 0
+    return out + out.T
 
 def diag_index_for_mat(size:int, start_diag:int, stop_diag:int) -> callable:
     """Return function that helps with indexing the diagonals in the flatten version
@@ -572,12 +585,29 @@ def diag_index_for_mat(size:int, start_diag:int, stop_diag:int) -> callable:
     """
     def indexing(index):
         if index < start_diag:
-            raise IndexError("Target window for diagonals starts with {start_diag}th diagonal.")
+            raise IndexError(f"Target window for diagonals starts with {start_diag}th diagonal.")
         if index >= stop_diag:
-            raise IndexError("Target window for diagonals stops at {stop_diag}th diagonal.")
+            raise IndexError(f"Target window for diagonals stops at {stop_diag}th diagonal.")
         largest_diagonal = size - start_diag
         offset = index - start_diag
         start_index = largest_diagonal*offset - (offset)*(offset-1)/2
         end_index = start_index + largest_diagonal - offset
         return range(int(start_index), int(end_index))
     return indexing
+
+def read_regions(path:str, res:int, patch_size:int) -> pd.DataFrame:
+    """Read regions from the path, provided as a bed file.
+
+    Args:
+        path (str): file path.
+        res (int): desired resolution, should match contact map's.
+        patch_size (int): one dimension of the square contact map patch.
+
+    Returns:
+        pd.DataFrame: a DataFrame of regions
+    """
+    regions = pd.read_csv(path, sep="\t", header=None)
+    regions.columns = ["chr", "start", "end", "fold"] 
+    regions["start"] = regions["start"]//res * res
+    regions["end"] = regions["start"] + patch_size * res
+    return regions

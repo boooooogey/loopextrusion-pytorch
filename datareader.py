@@ -2,8 +2,8 @@
 Data loader implementation for DLEM data.
 """
 import os
-import pandas as pd
 from typing import Tuple
+import pandas as pd
 import numpy as np
 import torch
 from numpy.typing import ArrayLike
@@ -36,7 +36,9 @@ class DLEMDataset(torch.utils.data.Dataset):
                                  header=None).iloc[:,3].to_numpy()
 
     def __getitem__(self, index:int) -> Tuple[ArrayLike, ArrayLike]:
-        return np.array(self.patches[index]), np.array(self.tracks[index])
+        tracks = np.array(self.tracks[index])
+        tracks[np.isnan(tracks)] = 0
+        return np.array(self.patches[index]), tracks
 
     def __len__(self)->int:
         return int(self.args["SAMPLE_NUM"])
@@ -58,10 +60,10 @@ class DLEMDataset(torch.utils.data.Dataset):
 
     @property
     def patch_dim(self) -> ArrayLike:
-        """return folds"""
+        """return patch dimensions"""
         return int(self.args['PATCH_DIM'])
 
     @property
     def feature_dim(self) -> ArrayLike:
-        """return folds"""
+        """return feature dimensions"""
         return int(self.args['FEA_DIM'])
