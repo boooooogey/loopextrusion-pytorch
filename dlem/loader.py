@@ -1,27 +1,55 @@
 """Loader function for dlem models
 """
 import importlib
+import importlib.util
+import os
 
-def load_model(model_name:str):
+def import_class_from_file(file_path:str, class_name:str):
+    """
+    Dynamically imports a class from a given file.
+
+    Args:
+        param file_path (str): Path to the Python file
+        param class_name (str): Name of the class to import
+
+    Returns:
+        The imported class
+    """
+    module_name = os.path.splitext(os.path.basename(file_path))[0]
+    spec = importlib.util.spec_from_file_location(module_name, file_path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    cls = getattr(module, class_name)
+    return cls
+
+def load_model(model_name:str, import_from_file:bool=False):
     """Returns models from model directory.
 
     Args:
         model_name (str): name of the file that hosts the model.
+        import_from (bool): alternatively reads from a file outside of the package folder.
 
     Returns:
         model class
     """
-    module = importlib.import_module(f'dlem.models.{model_name}')
-    return module.DLEM
+    if import_from_file:
+        return import_class_from_file(model_name, "DLEM")
+    else:
+        module = importlib.import_module(f'dlem.models.{model_name}')
+        return module.DLEM
 
-def load_reader(reader_name:str):
+def load_reader(reader_name:str, import_from_file:bool=False):
     """Returns readers from reader directory.
 
     Args:
         model_name (str): name of the file that hosts the model.
+        import_from (bool): alternatively reads from a file outside of the package folder.
 
     Returns:
         model class
     """
-    module = importlib.import_module(f'dlem.readers.{reader_name}')
-    return module.DLEMDataset
+    if import_from_file:
+        return import_class_from_file(reader_name, "DLEMDataset")
+    else:
+        module = importlib.import_module(f'dlem.readers.{reader_name}')
+        return module.DLEMDataset
