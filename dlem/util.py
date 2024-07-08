@@ -41,7 +41,7 @@ def tile_patch(patch:ArrayLike, kernel_size:int):
     Returns:
         ArrayLike: tiled smaller matrix.
     """
-    return func.avg_pool2d(torch.tensor(patch).unsqueeze(0),
+    return func.avg_pool2d(torch.from_numpy(patch).unsqueeze(0),
                            kernel_size=kernel_size,
                            stride=kernel_size)[0]
 
@@ -92,7 +92,7 @@ def diagonal_normalize(mat:ArrayLike) -> ArrayLike:
         ArrayLike: matrix with 0 centered diagonals.
     """
 
-    mat = torch.tensor(mat)
+    mat = torch.from_numpy(mat)
     out = torch.zeros_like(mat)
     for i in range(mat.shape[1]):
         diag_i = get_diags(mat, i)
@@ -154,7 +154,7 @@ def train(model:Module,
                                                  the trajectory of correlation
     """
 
-    data = torch.tensor(data).to(dev)
+    data = torch.from_numpy(data).to(dev)
     init_diag = torch.ones((data.shape[0], data.shape[1])) * data.shape[1]
     init_diag = init_diag.to(dev)
     best_corr = -torch.inf
@@ -299,7 +299,7 @@ def train_w_signal(model:Module,
     """
 
 
-    data = torch.tensor(data).to(dev)
+    data = torch.from_numpy(data).to(dev)
     init_diag = torch.ones((1, data.shape[1])) * data.shape[1]
     init_diag = init_diag.to(dev)
     best_corr = -torch.inf
@@ -382,7 +382,7 @@ def train_w_signal_tracking_diff(
                                                  the trajectory of correlation
     """
 
-    data = torch.tensor(data).to(dev)
+    data = torch.from_numpy(data).to(dev)
     init_diag = torch.ones((1, data.shape[1])) * data.shape[1]
     init_diag = init_diag.to(dev)
     best_corr = -torch.inf
