@@ -68,7 +68,12 @@ def extractor(patch:ArrayLike,
         ).detach().cpu().numpy()
         best_corr_pred = util.diagonal_normalize(np.log(best_corr_pred))
         best_corr_pred = best_corr_pred[0]
-        util.plot_results(patch, best_corr_pred, params, cmap="vlag")
+        util.plot_results(patch,
+                          best_corr_pred,
+                          params,
+                          ignore_i=diag_start,
+                          ignore_i_off=diag_stop,
+                          cmap="vlag")
         plt.savefig(plot_path)
         plt.close()
     return params, np.max(arr_corr)
