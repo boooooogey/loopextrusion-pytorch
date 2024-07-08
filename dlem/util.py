@@ -15,6 +15,7 @@ from numpy.typing import ArrayLike
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.colors import Normalize
+import seaborn
 from IPython.display import display, clear_output
 
 

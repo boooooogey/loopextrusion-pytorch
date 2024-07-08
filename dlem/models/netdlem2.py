@@ -106,5 +106,4 @@ class DLEM(Module):
             Tuple[ArrayLike,ArrayLike,ArrayLike]: parameters 
         """
         return (self.left.detach().cpu().numpy(),
-                self.right.detach().cpu().numpy(),
-                self.unload.detach().cpu().numpy())
+                self.right.detach().cpu().numpy())
