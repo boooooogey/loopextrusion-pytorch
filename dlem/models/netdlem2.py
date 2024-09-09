@@ -44,7 +44,6 @@ class DLEM(Module):
         Returns:
             ArrayLike: prediction for the next state.
         """
-        #curr_diag = torch.exp(curr_diag)
         diag_len, n = curr_diag.shape[-1], self.n
 
         index_in_left = range(index_diag, n-1)
@@ -85,7 +84,7 @@ class DLEM(Module):
             for diag in range(index_diag, self.n-1):
                 curr_diag = self.forward(curr_diag, diag, transform=False)
                 out = out + torch.diag_embed(curr_diag, offset=diag+1)
-        return out +torch.transpose(torch.triu(out, 1), -1,-2)
+        return out + torch.transpose(torch.triu(out, 1), -1,-2)
 
     def project_to_constraints(self, lower:float, upper:float) -> None:
         """Project the parameters onto [lower, upper]

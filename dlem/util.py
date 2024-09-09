@@ -169,6 +169,8 @@ def train(model:Module,
 
     train_ii = diagonal_region_indices_from(data, diag_start, diag_end)
 
+    best_loss_model, best_corr_model = copy.deepcopy(model), copy.deepcopy(model)
+
     for e in range(num_epoch):
         optimizer.zero_grad()
         loss_total = 0

@@ -76,8 +76,7 @@ class DLEM(Module):
         Returns:
             ArrayLike: prediction for the next state.
         """
-        #curr_diag = torch.exp(curr_diag)
-        diag_len, n = len(curr_diag), self.n
+        diag_len, n = curr_diag.shape[-1], self.n
 
         index_in_left = range(index_diag, n-1)
         index_in_right = range(1, n-index_diag)
@@ -91,8 +90,8 @@ class DLEM(Module):
         index_curr_diag_left = range(0, diag_len-1)
         index_curr_diag_right = range(1, diag_len)
 
-        mass_in = curr_diag[index_curr_diag_right] * self.right[index_in_right]
-        mass_in += curr_diag[index_curr_diag_left] * self.left[index_in_left]
+        mass_in = curr_diag[:, index_curr_diag_right] * self.right[index_in_right]
+        mass_in += curr_diag[:, index_curr_diag_left] * self.left[index_in_left]
 
         mass_out = self.right[index_out_right] + self.left[index_out_left]
         mass_out +=  1 - self.const
@@ -122,14 +121,14 @@ class DLEM(Module):
         Returns:
             ArrayLike: predicted contact mass.
         """
-        index_diag = self.n - len(init_mass)
+        index_diag = self.n - init_mass.shape[1]
         out = torch.diag_embed(init_mass, offset=index_diag)
         curr_diag = init_mass
         with torch.no_grad():
             for diag in range(index_diag, self.n-1):
                 curr_diag = self.forward(curr_diag, diag, transform=False)
                 out = out + torch.diag_embed(curr_diag, offset=diag+1)
-        return out + torch.triu(out, 1).T
+        return out + torch.transpose(torch.triu(out, 1), -1,-2)
 
     def project_to_constraints(self, lower:float, upper:float) -> None:
         """Project the parameters onto [lower, upper]
