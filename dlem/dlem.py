@@ -1,11 +1,12 @@
 from typing import List, Union, Any
+import argparse
 from tqdm import tqdm
 import numpy as np
 import pandas as pd
 import torch
 from dlem.loader import load_model, load_reader
 from dlem.feature_extraction import extractor
-import argparse
+from dlem.util import diagonal_normalize
 
 def initiate_dataframe(column_names:List[str], length:int) -> pd.DataFrame:
     """_summary_
@@ -75,7 +76,7 @@ def extract_param_from_mcool(cooler_file:str,
             if perc_nan > perc_nan_threshold:
                 out = ([np.nan] * len(model_tmp.return_parameter_names()), np.nan)
             else:
-                out = extractor(patch,
+                out = extractor(diagonal_normalize(np.log(patch)[np.newaxis])[0],
                                 learning_rate=lr,
                                 arch=model_name,
                                 diag_start=diag_start,
