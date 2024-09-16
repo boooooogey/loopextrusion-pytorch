@@ -4,6 +4,7 @@ import inspect
 from . import util
 from .loader import load_model, load_reader
 from .feature_extraction import extractor
+from .dlem import dlem
 
 all_functions = {name: obj for name, obj in inspect.getmembers(util) if inspect.isfunction(obj)}
 
@@ -14,3 +15,4 @@ __all__ = list(all_functions.keys())
 __all__.extend(['load_model'])
 __all__.extend(['load_reader'])
 __all__.extend(['extractor'])
+__all__.extend(['dlem'])

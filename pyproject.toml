@@ -20,3 +20,6 @@ classifiers = [
 [project.urls]
 Homepage = "https://github.com/boooooogey/loopextrusion-pytorch"
 Issues = "https://github.com/boooooogey/loopextrusion-pytorch/issues"
+
+[project.scripts]
+DLEM = "dlem:dlem"

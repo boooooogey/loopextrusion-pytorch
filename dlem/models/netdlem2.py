@@ -1,6 +1,6 @@
 """Implementation of DLEM with pytorch
 """
-from typing import Tuple
+from typing import Tuple, List
 from torch.nn import Module
 from torch.nn import Parameter
 import torch
@@ -9,8 +9,7 @@ from numpy.typing import ArrayLike
 class DLEM(Module):
     """Differentiable loop extrusion model in pytorch.
     """
-    def __init__(self, left_init:ArrayLike,
-                       right_init:ArrayLike,
+    def __init__(self, n:int,
                        unload_init:float=0.95,
                        free_unload:bool=False):
         """_summary_
@@ -21,13 +20,12 @@ class DLEM(Module):
             free_unload (bool, optional): _description_. Defaults to False.
             type (int, optional): _description_. Defaults to 1.
         """
-        left_init, right_init = torch.Tensor(left_init), torch.Tensor(right_init)
         super(DLEM, self).__init__()
         self.const = Parameter(torch.tensor(0.99), requires_grad = True)
-        self.n = len(left_init)
-        self.left = Parameter(left_init, requires_grad=True)
-        self.right = Parameter(right_init, requires_grad=True)
-        self.unload = Parameter(torch.ones_like(left_init) * unload_init, requires_grad=free_unload)
+        self.n = n
+        self.left = Parameter(torch.ones(n) * 0.95, requires_grad=True)
+        self.right = Parameter(torch.ones(n) * 0.95, requires_grad=True)
+        self.unload = Parameter(torch.ones_like(self.left) * unload_init, requires_grad=free_unload)
 
     def forward(self,
                 curr_diag:ArrayLike,
@@ -98,7 +96,7 @@ class DLEM(Module):
             self.left.clamp_(lower, upper)
             self.unload.clamp_(lower, upper)
 
-    def return_parameters(self) -> Tuple[ArrayLike,ArrayLike,ArrayLike]:
+    def return_parameters(self) -> Tuple[ArrayLike,ArrayLike]:
         """Return model parameters as a tuple.
 
         Returns:
@@ -106,3 +104,11 @@ class DLEM(Module):
         """
         return (self.left.detach().cpu().numpy(),
                 self.right.detach().cpu().numpy())
+
+    def return_parameter_names(self) -> List[str]:
+        """Return the parameter names.
+
+        Returns:
+            List[str]: parameter names
+        """
+        return ["left", "right"]

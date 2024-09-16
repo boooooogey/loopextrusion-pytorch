@@ -127,10 +127,12 @@ def train(model:Module,
           data:ArrayLike,
           diag_start:int,
           diag_end:int,
+          do_print:bool=False,
           dev:device=None,
           num_epoch:int=100,
           parameter_lower_bound:float=1e-9,
-          parameter_upper_bound:float=1.0) -> Tuple[Module, Module, ArrayLike, ArrayLike]:
+          parameter_upper_bound:float=1.0,
+          early_thresh:float=1e-5) -> Tuple[Module, Module, ArrayLike, ArrayLike]:
     """Train diagonal model.
 
     Args:
@@ -172,6 +174,10 @@ def train(model:Module,
     best_loss_model, best_corr_model = copy.deepcopy(model), copy.deepcopy(model)
 
     for e in range(num_epoch):
+        curr_lr = scheduler.get_last_lr()[-1]
+        if curr_lr < early_thresh:
+            break
+        optimizer.zero_grad()
         optimizer.zero_grad()
         loss_total = 0
         pred_map = model.contact_map_prediction(init_diag)
@@ -193,10 +199,11 @@ def train(model:Module,
         scheduler.step(curr_cor)
 
         model.project_to_constraints(parameter_lower_bound, parameter_upper_bound)
-        print(f'{int((e+1)/num_epoch*100):3}/100: '
-              f'correlation = {curr_cor:.3f}, '
-              f'loss = {loss_total:.3f}',
-              flush=True, end='\r')
+        if do_print:
+            print(f'{int((e+1)/num_epoch*100):3}/100: '
+                f'correlation = {curr_cor:.3f}, '
+                f'loss = {loss_total:.3f}',
+                flush=True, end='\r')
 
     return best_loss_model, best_corr_model, np.array(arr_loss), np.array(arr_corr)
 
