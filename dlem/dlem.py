@@ -111,18 +111,26 @@ def parse_arguments():
     parser = argparse.ArgumentParser(description='DLEM')
     parser.add_argument('cooler_file', type=str, help='Path to the cooler file')
     parser.add_argument('output_path', type=str, help='Path to save the output')
-    parser.add_argument('model_name', type=str, help='Name of the model')
-    parser.add_argument('window_size', type=int, help='Window size')
-    parser.add_argument('stride', type=int, help='Stride')
     parser.add_argument('resolution', type=int, help='Resolution')
-    parser.add_argument('--chrom_subset', nargs='+', help='Subset of chromosomes')
-    parser.add_argument('--perc_nan_threshold', type=float, default=0.3,
+    parser.add_argument('--stride', type=int, help='Stride')
+    parser.add_argument('--window-size', type=int, help='Window size')
+    parser.add_argument('--model-name', type=str, default="netdlem2", help='Name of the model')
+    parser.add_argument('--chrom-subset', nargs='+', help='Subset of chromosomes')
+    parser.add_argument('--perc-nan-threshold', type=float, default=0.3,
                         help='Percentage NaN threshold')
     parser.add_argument('--lr', type=float, default=0.5, help='Learning rate')
-    parser.add_argument('--reader_name', type=str, default='datareader_cooler',
+    parser.add_argument('--reader-name', type=str, default='datareader_cooler',
                         help='Name of the reader')
 
-    return parser.parse_args()
+    args = parser.parse_args()
+
+    if args.window_size is None:
+        args.window_size = 2_000_000 // args.resolution
+
+    if args.stride is None:
+        args.stride = args.window_size // 4
+
+    return args
 
 def dlem():
     """DLEM user interface.
