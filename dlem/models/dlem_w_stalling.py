@@ -29,7 +29,7 @@ reflection for stall added
 
     
 """
-from typing import Tuple
+from typing import Tuple, List
 from torch.nn import Module
 from torch.nn import Parameter
 import torch
@@ -38,8 +38,7 @@ from numpy.typing import ArrayLike
 class DLEM(Module):
     """Differentiable loop extrusion model in pytorch.
     """
-    def __init__(self, left_init:ArrayLike,
-                       right_init:ArrayLike,
+    def __init__(self, n,
                        unload_init:float=0.95,
                        free_unload:bool=False,
                        free_stall:bool=False,
@@ -52,14 +51,18 @@ class DLEM(Module):
             free_unload (bool, optional): _description_. Defaults to False.
             type (int, optional): _description_. Defaults to 1.
         """
-        left_init, right_init = torch.Tensor(left_init), torch.Tensor(right_init)
+        #left_init, right_init = torch.Tensor(left_init), torch.Tensor(right_init)
         super(DLEM, self).__init__()
         self.const = Parameter(torch.tensor(1.00), requires_grad = True)
-        self.n = len(left_init)
-        self.left = Parameter(left_init, requires_grad=True)
-        self.right = Parameter(right_init, requires_grad=True)
-        self.unload = Parameter(torch.ones_like(left_init) * unload_init, requires_grad=free_unload)
-        self.stall = Parameter(torch.tensor([stall_init], dtype=torch.float32), requires_grad=free_stall)
+        self.n = n
+        #self.n = len(left_init)
+        #self.left = Parameter(left_init, requires_grad=True)
+        #self.right = Parameter(right_init, requires_grad=True)
+        self.left = Parameter(torch.ones(n) * 0.95, requires_grad=True)
+        self.right = Parameter(torch.ones(n) * 0.95, requires_grad=True)
+        self.unload = Parameter(torch.ones(n) * unload_init, requires_grad=free_unload)
+        self.stall = Parameter(torch.tensor([stall_init], dtype=torch.float32),
+                               requires_grad=free_stall)
 
     def forward(self,
                 curr_diag:ArrayLike,
@@ -104,7 +107,7 @@ class DLEM(Module):
         # mass_out += self.stall * (1 / self.right[index_stall_right] * 1 / self.left[index_stall_left])  
         #mass_out += ((1-self.unload[index_in_left]) + (1-self.unload[index_in_right])) * (1 - self.right[index_stall_right] + 1 - self.left[index_stall_left]) 
 
-        next_diag_pred = mass_in / mass_out # * self.const 
+        next_diag_pred = mass_in / mass_out # * self.const
 
         if transform:
             next_diag_pred = torch.log(next_diag_pred)
@@ -144,14 +147,19 @@ class DLEM(Module):
             self.stall.clamp_(lower, upper)
             self.const.clamp_(lower, upper)
 
-    def return_parameters(self) -> Tuple[ArrayLike,ArrayLike,ArrayLike]:
+    def return_parameters(self) -> Tuple[ArrayLike,ArrayLike]:
         """Return model parameters as a tuple.
 
         Returns:
             Tuple[ArrayLike,ArrayLike,ArrayLike]: parameters 
         """
         return (self.left.detach().cpu().numpy(),
-                self.right.detach().cpu().numpy(),
-                self.unload.detach().cpu().numpy(),
-                self.stall.detach().cpu().numpy(),
-                self.const.detach().cpu().numpy())
+                self.right.detach().cpu().numpy())
+
+    def return_parameter_names(self) -> List[str]:
+        """Return the parameter names.
+
+        Returns:
+            List[str]: parameter names
+        """
+        return ["left", "right"]
