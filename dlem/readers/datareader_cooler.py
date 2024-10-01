@@ -63,6 +63,7 @@ class DLEMDataset(Dataset):
                  window_size:int,
                  stride:int,
                  chrom_subset:Union[List[str],None]=None,
+                 return_raw:bool=False,
                  do_adaptive_coarsegrain=True):
 
         self.cooler_file = cooler_file
@@ -82,14 +83,19 @@ class DLEMDataset(Dataset):
                                                          self.stride)
 
         self.start_indices = np.cumsum(self.chromosome_len_list)
-        self.len = self.start_indices[-1]  # Total number of windows
+        self.len_original = self.start_indices[-1]  # Total number of windows
+        self.len = self.len_original
         self.start_indices = np.insert(self.start_indices, 0, 0)[:-1]
+        self.quality_indices = []
+        self.return_raw = return_raw
 
     def __len__(self):
         # Return the total number of samples in the dataset
         return self.len
 
     def __getitem__(self, indx):
+        if len(self.quality_indices) != 0:
+            indx = self.quality_indices[indx]
         # Get the chromosome, start, end from the index
         chromosome, start, end = find_genomic_position(indx,
                                                        self.start_indices,
@@ -105,12 +111,32 @@ class DLEMDataset(Dataset):
                                                 chromosome,
                                                 start,
                                                 end,
-                                                self.do_adaptive_coarsegrain)
+                                                self.do_adaptive_coarsegrain,
+                                                self.return_raw)
 
         # Convert the contact map and sum_zero to torch tensors
-        contact_map = torch.from_numpy(contact_map)
+        contact_map = torch.from_numpy(contact_map.astype(np.float32))
 
         return contact_map, sum_zero, chromosome, start, end
+
+    def filter_out_dataset(self, quality_metric:float):
+        """Filter out regions from the dataset based on a quality metric.
+
+        Args:
+            quality_metric (float): The threshold value for the quality metric. Regions with a
+            quality metric
+                       below this threshold will be filtered out.
+        """
+        self.quality_indices = []
+        self.len = self.len_original
+        quality_indices = []
+        for i, (_, perc_nan, _, _, _) in enumerate(self):
+            if perc_nan < quality_metric:
+                quality_indices.append(i)
+            if i >= self.len:
+                break
+        self.len = len(quality_indices)
+        self.quality_indices = quality_indices
 
     def return_chrom_size_list(self) -> List[Tuple[str, int]]:
         """

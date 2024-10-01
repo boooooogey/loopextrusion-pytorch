@@ -126,6 +126,7 @@ def get_contact_map(
     start: int,
     end: int,
     do_adaptive_coarsegrain: bool = True,
+    return_raw: bool = False
 ) -> ArrayLike:
     """Get the contact map for a specified region.
 
@@ -150,21 +151,25 @@ def get_contact_map(
     # Define the region of interest
     region = (chromosome, start, end)
 
-    # Get the contact matrix for the specified region
-    contact_map = c.matrix(balance=True).fetch(region)
+    if return_raw:
+        contact_map = c.matrix(balance=False).fetch(region)
+    else:
+        # Get the contact matrix for the specified region
+        contact_map = c.matrix(balance=True).fetch(region)
 
-    if do_adaptive_coarsegrain:
-        # Apply adaptive coarse-graining to the contact map
-        # Mute numpy warnings
-        np.seterr(all='ignore')
+        if do_adaptive_coarsegrain:
+            # Apply adaptive coarse-graining to the contact map
+            # Mute numpy warnings
+            np.seterr(all='ignore')
 
-        # Apply adaptive coarse-graining to the contact map
-        contact_map = adaptive_coarsegrain(contact_map,
-                                           c.matrix(balance=False).fetch(region),
-                                           cutoff=3, max_levels=8)
+            # Apply adaptive coarse-graining to the contact map
+            contact_map = adaptive_coarsegrain(contact_map,
+                                            c.matrix(balance=False).fetch(region),
+                                            cutoff=3, max_levels=8)
 
-        # Reset numpy error handling behavior
-        np.seterr(all='warn')
+            # Reset numpy error handling behavior
+            np.seterr(all='warn')
+   
 
     sum_zero = np.sum(np.nansum(contact_map, axis=0) == 0)/contact_map.shape[0]
 

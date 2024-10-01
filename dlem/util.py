@@ -178,7 +178,6 @@ def train(model:Module,
         if curr_lr < early_thresh:
             break
         optimizer.zero_grad()
-        optimizer.zero_grad()
         loss_total = 0
         pred_map = model.contact_map_prediction(init_diag)
         pred_map = torch.exp(diagonal_normalize(torch.log(pred_map)))

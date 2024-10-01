@@ -11,19 +11,20 @@ class SequencePooler(Module):
     def __init__(self, output_dim:int):
         super(SequencePooler, self).__init__()
         self.output_dim = output_dim
+        self.hidden_dim = 32
         self.pooler = Sequential(Conv1d(in_channels=4,
-                                       out_channels=10,
+                                       out_channels=self.hidden_dim,
                                        kernel_size=5,
                                        stride=10,
                                        dilation=2),
                                  ReLU(),
-                                Conv1d(in_channels=10,
-                                       out_channels=10,
+                                Conv1d(in_channels=self.hidden_dim,
+                                       out_channels=self.hidden_dim,
                                        kernel_size=5,
                                        stride=10,
                                        dilation=2),
                                  ReLU(),
-                                 Conv1d(in_channels=10,
+                                 Conv1d(in_channels=self.hidden_dim,
                                        out_channels=output_dim,
                                        kernel_size=5,
                                        stride=10,
