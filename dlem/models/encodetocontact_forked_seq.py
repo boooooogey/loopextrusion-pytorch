@@ -8,10 +8,10 @@ from torch.nn import ModuleList
 from .. import util
 
 class SequencePooler(Module):
-    def __init__(self, output_dim:int):
+    def __init__(self, output_dim:int, hidden_dim:int):
         super(SequencePooler, self).__init__()
         self.output_dim = output_dim
-        self.hidden_dim = 32
+        self.hidden_dim = hidden_dim
         self.pooler = Sequential(Conv1d(in_channels=4,
                                        out_channels=self.hidden_dim,
                                        kernel_size=5,
@@ -42,7 +42,8 @@ class DLEM(Module):
                        stop_diag:int,
                        seq_fea_dim:int,
                        channel_per_route:int=3,
-                       layer_num:int = 4):
+                       layer_num:int = 4,
+                       hidden_dim:int = 16):
         """_summary_
 
         Args:
@@ -68,7 +69,7 @@ class DLEM(Module):
         network_width = layer_num * channel_per_route
         self.seq_fea_dim = seq_fea_dim
         self.epi_dim = epi_dim
-        self.seq_pooler = SequencePooler(seq_fea_dim)
+        self.seq_pooler = SequencePooler(seq_fea_dim, hidden_dim)
 
         self.convs  = [conv_unit_maker(epi_dim + seq_fea_dim, network_width)]
         self.convs += [conv_unit_maker(channel_per_route*i,
