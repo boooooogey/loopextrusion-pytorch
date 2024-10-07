@@ -3,12 +3,24 @@
 from typing import Tuple
 from numpy.typing import ArrayLike
 import torch
-from torch.nn import Module, Parameter, Sequential, ReLU, Sigmoid, Conv1d, ConvTranspose1d
-from torch.nn import ModuleList
+from torch.nn import (Module,
+                      Parameter,
+                      Sequential,
+                      ReLU,
+                      Sigmoid,
+                      Conv1d,
+                      ConvTranspose1d,
+                      ModuleList,
+                      BatchNorm1d)
 from .. import util
 
-def _dlem(curr_diag:ArrayLike, left_right:ArrayLike, const:ArrayLike, index_diag:int, n:int):
-    diag_len, n = curr_diag.shape[1], n
+def _dlem(curr_diag:ArrayLike,
+          left_right:ArrayLike,
+          const:ArrayLike,
+          index_diag:int,
+          n:int,
+          eps=1e-6) -> ArrayLike:
+    diag_len = curr_diag.shape[1]
 
     left = left_right[:, 0, :]
     right = left_right[:, 1, :]
@@ -24,35 +36,53 @@ def _dlem(curr_diag:ArrayLike, left_right:ArrayLike, const:ArrayLike, index_diag
     mass_in = curr_diag[:, index_curr_diag_right] * right[:, index_in_right]
     mass_in += curr_diag[:, index_curr_diag_left] * left[:, index_in_left]
 
-    mass_out = right[:, index_out_right] + left[:, index_out_left]
+    mass_out = right[:, index_out_right] + left[:, index_out_left] + eps
 
     next_diag_pred = const * mass_in / mass_out
 
     return next_diag_pred
+
+class InterleavedConv1d(Module):
+    def __init__(self, in_channels:int, out_channels:int, kernel_size:int):
+        super(InterleavedConv1d, self).__init__()
+        self.left_conv = Conv1d(in_channels=in_channels,
+                                out_channels=out_channels//2,
+                                kernel_size=kernel_size,
+                                stride=2 * kernel_size,
+                                dilation=2)
+        self.right_conv = Conv1d(in_channels=in_channels,
+                                 out_channels=out_channels-out_channels//2,
+                                 kernel_size=kernel_size,
+                                 stride=2 * kernel_size,
+                                 dilation=2)
+    def forward(self, x):
+        left = self.left_conv(x)
+        x = self.right_conv(x[...,1:])
+        return torch.concat([left, x], axis=-2)
 
 class SequencePooler(Module):
     def __init__(self, output_dim:int, hidden_dim:int):
         super(SequencePooler, self).__init__()
         self.output_dim = output_dim
         self.hidden_dim = hidden_dim
-        self.pooler = Sequential(Conv1d(in_channels=4,
-                                       out_channels=self.hidden_dim,
-                                       kernel_size=5,
-                                       stride=10,
-                                       dilation=2),
-                                 ReLU(),
-                                Conv1d(in_channels=self.hidden_dim,
-                                       out_channels=self.hidden_dim,
-                                       kernel_size=5,
-                                       stride=10,
-                                       dilation=2),
-                                 ReLU(),
-                                 Conv1d(in_channels=self.hidden_dim,
-                                       out_channels=output_dim,
-                                       kernel_size=5,
-                                       stride=10,
-                                       dilation=2),
-                                 ReLU())
+        layers = [InterleavedConv1d(in_channels=4,
+                                    out_channels=self.hidden_dim,
+                                    kernel_size=5),
+                  ReLU(),
+                  BatchNorm1d(self.hidden_dim)]
+        layers += [InterleavedConv1d(in_channels=self.hidden_dim,
+                                     out_channels=self.hidden_dim,
+                                     kernel_size=5),
+                   ReLU(),
+                   BatchNorm1d(self.hidden_dim)] * 2
+
+        layers += [InterleavedConv1d(in_channels=self.hidden_dim,
+                                     out_channels=self.output_dim,
+                                     kernel_size=5),
+                   ReLU()]
+
+        self.pooler = Sequential(*layers)
+
     def forward(self, seq):
         return self.pooler(seq)
 
@@ -65,7 +95,8 @@ class DLEM(Module):
                        stop_diag:int,
                        seq_fea_dim:int,
                        channel_per_route:int=3,
-                       layer_num:int = 4):
+                       layer_num:int = 4,
+                       hidden_dim:int = 16):
         """_summary_
 
         Args:
@@ -91,6 +122,9 @@ class DLEM(Module):
         network_width = layer_num * channel_per_route
         self.seq_fea_dim = seq_fea_dim
         self.epi_dim = epi_dim
+        self.seq_pooler = SequencePooler(seq_fea_dim, hidden_dim)
+
+        self.feature_batch_norm = BatchNorm1d(epi_dim + seq_fea_dim)
 
         self.convs  = [conv_unit_maker(epi_dim + seq_fea_dim, network_width)]
         self.convs += [conv_unit_maker(channel_per_route*i,
@@ -113,6 +147,7 @@ class DLEM(Module):
         self.start_diag = start_diag
         self.stop_diag = stop_diag
         self.indexing = util.diag_index_for_mat(n, start_diag, stop_diag)
+        self.indexing_out = util.diag_index_for_mat(n, start_diag+1, stop_diag)
 
     def converter(self, signal:ArrayLike, seq:ArrayLike) -> ArrayLike:
         """Converts the input epigenetic signals into DLEM parameters.
@@ -123,8 +158,9 @@ class DLEM(Module):
         Returns:
             ArrayLike: parameters, p_l, p_r
         """
+        seq = self.seq_pooler(seq)
         layer_outs = []
-        tmp = torch.cat([signal, seq], axis=1)
+        tmp = self.feature_batch_norm(torch.cat([signal, seq], axis=-2))
         for n, conv in enumerate(self.convs):
             tmp = conv(tmp)
             out_tmp = tmp[:,:self.channel_per_route]
@@ -136,10 +172,9 @@ class DLEM(Module):
         return self.mixer(out)
 
     def forward(self,
+                diagonals:ArrayLike,
                 signal:ArrayLike,
-                curr_diag:ArrayLike,
-                seq:ArrayLike,
-                index_diag:int) -> ArrayLike:
+                seq:ArrayLike) -> ArrayLike:
         """forward operation for the network.
 
         Args:
@@ -151,12 +186,16 @@ class DLEM(Module):
         Returns:
             ArrayLike: prediction for the next state.
         """
-        left_right = self.converter(signal, seq)
-        diags = []
+        dev = self.mixer[0].weight.device
+        left_right = self.converter(signal.to(dev), seq.to(dev))
+        out = torch.empty((diagonals.shape[0],
+                           diagonals.shape[1]-(self.n-self.start_diag)), device="cpu")
         for index_diag in range(self.start_diag, self.stop_diag-1):
-            _dlem(curr_diag, left_right, self.const, index_diag, self.n)
-
-        return next_diag_pred
+            diag_pred = torch.log(_dlem(torch.exp(diagonals[:, self.indexing(index_diag)]).to(dev),
+                                        left_right, self.const, index_diag, self.n))
+            diag_pred -=  torch.mean(diag_pred)
+            out[:, self.indexing_out(index_diag+1)] = diag_pred.cpu()
+        return out
 
     def contact_map_prediction(self,
                                signal:ArrayLike,
@@ -170,17 +209,19 @@ class DLEM(Module):
         Returns:
             ArrayLike: predicted contact mass.
         """
-        start_diag, stop_diag = self.start_diag, self.stop_diag
-        curr_diag = init_mass
-        out_len = int((self.n - (stop_diag + start_diag - 1)/2) * (stop_diag-start_diag))
-        out = torch.zeros((signal.shape[0], out_len), device=signal.device)
+        dev = self.mixer[0].weight.device
+        curr_diag = init_mass.to(dev)
+        out_len = int((self.n - (self.stop_diag + self.start_diag - 1)/2) *
+                      (self.stop_diag-self.start_diag))
+        out_len -= (self.n - self.start_diag)
         with torch.no_grad():
-            for diag in range(self.stop_diag-1):
-                curr_diag = self.forward(signal, curr_diag, seq, diag, transform=False)
-                if diag >= self.start_diag-1:
-                    normed_diag = torch.log(curr_diag)
-                    normed_diag = normed_diag - normed_diag.mean(axis=1)[:, None]
-                    out[:, self.indexing(diag+1)] = normed_diag
+            left_right = self.converter(signal.to(dev), seq.to(dev))
+            out = torch.empty((init_mass.shape[0], out_len), device="cpu")
+            for index_diag in range(self.start_diag, self.stop_diag-1):
+                curr_diag = _dlem(curr_diag, left_right, self.const, index_diag, self.n)
+                normed_diag = torch.log(curr_diag)
+                normed_diag = normed_diag - normed_diag.mean(axis=1, keepdim=True)
+                out[:, self.indexing_out(index_diag+1)] = normed_diag.cpu()
         return out
 
     def return_parameters(self, signal:ArrayLike, seq:ArrayLike) -> Tuple[ArrayLike,ArrayLike,ArrayLike]:
