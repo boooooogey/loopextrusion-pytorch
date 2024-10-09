@@ -13,6 +13,7 @@ from torch.nn import (Module,
                       ModuleList,
                       BatchNorm1d)
 from .. import util
+from .seq_pooler import SequencePoolerInterleaved
 
 def _dlem(curr_diag:ArrayLike,
           left_right:ArrayLike,
@@ -41,50 +42,6 @@ def _dlem(curr_diag:ArrayLike,
     next_diag_pred = const * mass_in / mass_out
 
     return next_diag_pred
-
-class InterleavedConv1d(Module):
-    def __init__(self, in_channels:int, out_channels:int, kernel_size:int):
-        super(InterleavedConv1d, self).__init__()
-        self.left_conv = Conv1d(in_channels=in_channels,
-                                out_channels=out_channels//2,
-                                kernel_size=kernel_size,
-                                stride=2 * kernel_size,
-                                dilation=2)
-        self.right_conv = Conv1d(in_channels=in_channels,
-                                 out_channels=out_channels-out_channels//2,
-                                 kernel_size=kernel_size,
-                                 stride=2 * kernel_size,
-                                 dilation=2)
-    def forward(self, x):
-        left = self.left_conv(x)
-        x = self.right_conv(x[...,1:])
-        return torch.concat([left, x], axis=-2)
-
-class SequencePooler(Module):
-    def __init__(self, output_dim:int, hidden_dim:int):
-        super(SequencePooler, self).__init__()
-        self.output_dim = output_dim
-        self.hidden_dim = hidden_dim
-        layers = [InterleavedConv1d(in_channels=4,
-                                    out_channels=self.hidden_dim,
-                                    kernel_size=5),
-                  ReLU(),
-                  BatchNorm1d(self.hidden_dim)]
-        layers += [InterleavedConv1d(in_channels=self.hidden_dim,
-                                     out_channels=self.hidden_dim,
-                                     kernel_size=5),
-                   ReLU(),
-                   BatchNorm1d(self.hidden_dim)] * 2
-
-        layers += [InterleavedConv1d(in_channels=self.hidden_dim,
-                                     out_channels=self.output_dim,
-                                     kernel_size=5),
-                   ReLU()]
-
-        self.pooler = Sequential(*layers)
-
-    def forward(self, seq):
-        return self.pooler(seq)
 
 class DLEM(Module):
     """Predict contact map from Encode signals.
@@ -122,7 +79,7 @@ class DLEM(Module):
         network_width = layer_num * channel_per_route
         self.seq_fea_dim = seq_fea_dim
         self.epi_dim = epi_dim
-        self.seq_pooler = SequencePooler(seq_fea_dim, hidden_dim)
+        self.seq_pooler = SequencePoolerInterleaved(seq_fea_dim, hidden_dim)
 
         self.feature_batch_norm = BatchNorm1d(epi_dim + seq_fea_dim)
 
