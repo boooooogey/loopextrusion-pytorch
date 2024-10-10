@@ -48,7 +48,6 @@ class Conv1dResidualBlock(Module):
                                      dilation=2,
                                      kernel_size=kernel_size,
                                      padding=padding),
-                              ReLU(),
                               BatchNorm1d(out_channels),
                               ReLU(),
                               Conv1d(in_channels=out_channels,
@@ -78,7 +77,7 @@ class Conv1dPoolingBlock(Module):
                            padding=padding)
         padding = (dilation*(kernel_size - 1) + 1) // 2
         #arxiv.org/pdf/1603.05027
-        self.res = Conv1dResidualBlock(in_channels,
+        self.res = Conv1dResidualBlock(out_channels,
                                        out_channels,
                                        kernel_size,
                                        dilation)
@@ -130,12 +129,19 @@ class SequencePoolerResidual(Module):
         hidden_dim (int): The number of dimensions in the hidden layer.
         
     """
-    def __init__(self, output_dim:int, hidden_dim:int):
+    def __init__(self, output_dim:int):
         super(SequencePoolerResidual, self).__init__()
-        self.output_dim = output_dim
-        self.hidden_dim = hidden_dim
-        self.channel_numbers = [4, 32, 32, 32, 32, 64, 64, 128, 128]
+        self.channel_numbers = [4, 32, 32, 32, 32, 64, 64, 128, output_dim]
         self.stride = [2, 2, 2, 2, 5, 5, 5, 5]
+        assert len(self.channel_numbers) == len(self.stride) + 1
+        def _create_conv_block(channels, kernel_size, strides):
+            layers = []
+            for in_channel, out_channel, stride in zip(channels[:-1], channels[1:], strides):
+                layers.append(Conv1dPoolingBlock(in_channel, out_channel, kernel_size,
+                                                 stride=stride))
+            return Sequential(*layers)
+        self.layers = _create_conv_block(self.channel_numbers, 3, self.stride)
 
     def forward(self, seq):
-        return self.pooler(seq)
+        return self.layers(seq)
+    
