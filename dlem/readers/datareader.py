@@ -2,7 +2,7 @@
 Data loader implementation for DLEM data.
 """
 import os
-from typing import Tuple
+from typing import Tuple, List, Union
 import pandas as pd
 import numpy as np
 import torch
@@ -12,13 +12,17 @@ from .. import util
 class DLEMDataset(torch.utils.data.Dataset):
     """DLEM dataset to interface data batching and reading.
     """
-    def __init__(self, path:str) -> None:
+    def __init__(self, path:str, subselection:Union[List[int], None] = None) -> None:
         """
         Args:
             path (str): Dataset folder path.
         """
         self.json_path = path
         self.args = util.read_json(os.path.join(path, 'meta.json'))
+        if subselection is not None:
+            self.subselection = subselection
+        else:
+            self.subselection = np.arange(self.args['FEA_DIM'])
         self.patches = np.memmap(os.path.join(path, 'contactmaps.dat'),
                                  dtype='float32',
                                  mode = 'r',
@@ -38,7 +42,7 @@ class DLEMDataset(torch.utils.data.Dataset):
     def __getitem__(self, index:int) -> Tuple[ArrayLike, ArrayLike]:
         tracks = np.array(self.tracks[index])
         tracks[np.isnan(tracks)] = 0
-        return np.array(self.patches[index]), tracks
+        return np.array(self.patches[index]), tracks[self.subselection]
 
     def __len__(self)->int:
         return int(self.args["SAMPLE_NUM"])
@@ -66,4 +70,4 @@ class DLEMDataset(torch.utils.data.Dataset):
     @property
     def feature_dim(self) -> ArrayLike:
         """return feature dimensions"""
-        return int(self.args['FEA_DIM'])
+        return len(self.subselection)#int(self.args['FEA_DIM'])

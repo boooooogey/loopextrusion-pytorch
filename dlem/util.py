@@ -71,6 +71,25 @@ def vec_corr(vec1:Tensor, vec2:Tensor) -> Tensor:
     """
     return torch.corrcoef(torch.vstack([vec1, vec2]))[0,1]
 
+def vec_corr_batch(vec1:Tensor, vec2:Tensor, collapse:callable=None) -> Tensor:
+    """Correlation between of two batches. The shape is assumed to be 2 dimensional. The first
+    dimension is the batch size and the second dimension is the vector lenght. The corresponding
+    vectors are also assumed to be in the same order.
+
+    Args:
+        vec1 (Tensor): input 1.
+        vec2 (Tensor): input 2. 
+        collapse (callable): function to collapse the correlation. Defaults to torch.mean().
+
+    Returns:
+        Tensor: correlation
+    """
+    assert vec1.shape[0] == vec2.shape[0]
+    n = vec1.shape[0]
+    if collapse is None:
+        collapse = torch.mean
+    return collapse(torch.corrcoef(torch.vstack([vec1, vec2]))[range(n),range(n, 2*n)])
+
 def ignore_diag_plot(mat:ArrayLike, num_diag:int) -> ArrayLike:
     """ignore first few diagonals for plotting purposes.
 
