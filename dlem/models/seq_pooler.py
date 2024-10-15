@@ -1,5 +1,8 @@
+from torch.nn import Module, Conv1d, BatchNorm1d, ReLU, Sequential, GELU
 import torch
-from torch.nn import Module, Conv1d, BatchNorm1d, ReLU, Sequential
+from torch.nn.modules import activation
+from .attentionpooling import AttentionPooling1D
+
 
 class InterleavedConv1d(Module):
     """InterleavedConv1d is a module that performs interleaved convolution on 1-dimensional input
@@ -36,12 +39,13 @@ class Conv1dResidualBlock(Module):
                  in_channels:int,
                  out_channels:int=64,
                  kernel_size:int=3,
-                 dilation:int=2):
+                 dilation:int=2,
+                 activation:activation=ReLU):
         super(Conv1dResidualBlock, self).__init__()
         padding = (dilation*(kernel_size - 1) + 1) // 2
         #arxiv.org/pdf/1603.05027
         self.res = Sequential(BatchNorm1d(in_channels),
-                              ReLU(),
+                              activation(),
                               Conv1d(in_channels=in_channels,
                                      out_channels=out_channels,
                                      stride=1,
@@ -49,7 +53,7 @@ class Conv1dResidualBlock(Module):
                                      kernel_size=kernel_size,
                                      padding=padding),
                               BatchNorm1d(out_channels),
-                              ReLU(),
+                              activation(),
                               Conv1d(in_channels=out_channels,
                                      out_channels=out_channels,
                                      stride=1,
@@ -139,6 +143,38 @@ class SequencePoolerResidual(Module):
             for in_channel, out_channel, stride in zip(channels[:-1], channels[1:], strides):
                 layers.append(Conv1dPoolingBlock(in_channel, out_channel, kernel_size,
                                                  stride=stride))
+            return Sequential(*layers)
+        self.layers = _create_conv_block(self.channel_numbers, 3, self.stride)
+
+    def forward(self, seq):
+        return self.layers(seq)
+    
+class SequencePoolerAttention(Module):
+    """The module for pooling features from sequence for HiC contact map prediction. This specific
+    module uses residual convolutional layers to pool the sequence features.
+
+    Args:
+        output_dim (int): The number of different features to be pooled.
+        hidden_dim (int): The number of dimensions in the hidden layer.
+        
+    """
+    def __init__(self, output_dim:int):
+        super(SequencePoolerAttention, self).__init__()
+        self.channel_numbers = [4, 32, 64, 128, output_dim]
+        self.stride = [10, 10, 10, 10]
+        assert len(self.channel_numbers) == len(self.stride) + 1
+        def _create_conv_block(channels, kernel_size, strides):
+            layers = []
+            for in_channel, out_channel, stride in zip(channels[:-1], channels[1:], strides):
+                layers.append(Conv1d(in_channels=in_channel,
+                                     out_channels=out_channel,
+                                     kernel_size=1))
+                layers.append(Conv1dResidualBlock(out_channel,
+                                                  out_channels=out_channel,
+                                                  kernel_size=kernel_size,
+                                                  dilation=2,
+                                                  activation=GELU))
+                layers.append(AttentionPooling1D(stride, out_channel, mode="full"))
             return Sequential(*layers)
         self.layers = _create_conv_block(self.channel_numbers, 3, self.stride)
 
