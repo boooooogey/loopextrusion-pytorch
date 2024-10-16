@@ -160,7 +160,7 @@ class SequencePoolerAttention(Module):
     """
     def __init__(self, output_dim:int):
         super(SequencePoolerAttention, self).__init__()
-        self.channel_numbers = [4, 32, 64, 128, output_dim]
+        self.channel_numbers = [4, 16, 16, 16, output_dim]
         self.stride = [10, 10, 10, 10]
         assert len(self.channel_numbers) == len(self.stride) + 1
         def _create_conv_block(channels, kernel_size, strides):
