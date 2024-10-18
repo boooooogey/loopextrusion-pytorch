@@ -56,3 +56,50 @@ def load_reader(reader_name:str, import_from_file:bool=False):
     else:
         module = importlib.import_module(f'dlem.readers.{reader_name}')
         return module.DLEMDataset
+
+def load_class_from_file(file_path: str, class_name: str):
+    # Ensure the file exists
+    if not os.path.exists(file_path):
+        raise FileNotFoundError(f"{file_path} not found")
+
+    # Create a module specification from the file path
+    spec = importlib.util.spec_from_file_location("module.name", file_path)
+    
+    # Create a module from the specification
+    module = importlib.util.module_from_spec(spec)
+    
+    # Load the module
+    spec.loader.exec_module(module)
+    
+    # Get the class from the module
+    cls = getattr(module, class_name)
+    
+    return cls
+
+def load_trunk(trunk_name:str):
+    """Returns a trunk from trunk directory.
+
+    Args:
+        model_name (str): name of the file that hosts the model.
+        import_from (bool): alternatively reads from a file outside of the package folder.
+
+    Returns:
+        model class
+    """
+    module = importlib.import_module('dlem.trunks.seq_pooler')
+    cls = getattr(module, trunk_name)
+    return cls
+
+def load_head(head_name:str):
+    """Returns a head from head directory.
+
+    Args:
+        model_name (str): name of the file that hosts the model.
+        import_from (bool): alternatively reads from a file outside of the package folder.
+
+    Returns:
+        model class
+    """
+    module = importlib.import_module('dlem.trunks.seq_pooler')
+    cls = getattr(module, head_name)
+    return cls

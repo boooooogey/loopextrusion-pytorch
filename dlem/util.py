@@ -5,7 +5,6 @@ import copy
 import json
 import pandas as pd
 from torch.nn import Module
-import torch.nn.functional as func
 from torch.optim import Optimizer
 from torch.optim.lr_scheduler import LRScheduler
 from torch import device
@@ -15,7 +14,6 @@ from numpy.typing import ArrayLike
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.colors import Normalize
-import seaborn
 from IPython.display import display, clear_output
 
 
@@ -43,9 +41,8 @@ def tile_patch(patch:ArrayLike, kernel_size:int):
     """
     if isinstance(patch, np.ndarray):
         patch = torch.from_numpy(patch)
-    return func.avg_pool2d(patch.unsqueeze(0),
-                           kernel_size=kernel_size,
-                           stride=kernel_size)[0]
+    pooler = torch.nn.AvgPool2d(kernel_size=kernel_size, stride=kernel_size)
+    return pooler(patch.unsqueeze(0)).squeeze(0)
 
 def mat_corr(mat1:Tensor, mat2:Tensor) -> Tensor:
     """Correlation between two matrices.
@@ -341,6 +338,8 @@ def train_w_signal(model:Module,
     model = model.to(dev)
     sig = sig.to(dev)
 
+    best_loss_model, best_corr_model = copy.deepcopy(model), copy.deepcopy(model)
+
     train_ii = diagonal_region_indices_from(data, diag_start, diag_end)
 
     for e in range(num_epoch):
@@ -449,6 +448,7 @@ def train_w_signal_tracking_diff(
     #ax2.set_title('Training Correlation Over Time')
     ax2.legend()
     display(fig)
+    best_loss_model, best_corr_model = copy.deepcopy(model), copy.deepcopy(model)
 
     try:
         for e in range(num_epoch):
@@ -642,7 +642,46 @@ def read_regions(path:str, res:int, patch_size:int) -> pd.DataFrame:
         pd.DataFrame: a DataFrame of regions
     """
     regions = pd.read_csv(path, sep="\t", header=None)
-    regions.columns = ["chr", "start", "end", "fold"] 
+    regions.columns = ["chr", "start", "end", "fold"]
     regions["start"] = regions["start"]//res * res
     regions["end"] = regions["start"] + patch_size * res
     return regions
+
+def dlem(curr_diag:ArrayLike,
+         left:ArrayLike,
+         right:ArrayLike,
+         const:ArrayLike,
+         n:int,
+         eps:float=1e-6) -> ArrayLike:
+    """Simple differentiable loop extrusion model implementation. Implemented for the batched input.
+
+    Args:
+        curr_diag (ArrayLike): diagonal of the contact map used for prediction.
+        right (ArrayLike): right directional parameters.
+        left (ArrayLike): left directional parameters. 
+        const (ArrayLike): scaler for the ratio between inflow and outflow.
+        n (int): dimensions of the contact map.
+        eps (float, optional): A small number to avoid division by zero. Defaults to 1e-6.
+
+    Returns:
+        ArrayLike: The prediction for the next diagonal.
+    """
+    index_diag = n - curr_diag.shape[1]
+    diag_len = curr_diag.shape[1]
+
+    index_in_left = range(index_diag, n-1)
+    index_in_right = range(1, n-index_diag)
+    index_out_left = range(index_diag+1, n)
+    index_out_right = range(0, n-index_diag-1)
+
+    index_curr_diag_left = range(0, diag_len-1)
+    index_curr_diag_right = range(1, diag_len)
+
+    mass_in = curr_diag[:, index_curr_diag_right] * right[:, index_in_right]
+    mass_in += curr_diag[:, index_curr_diag_left] * left[:, index_in_left]
+
+    mass_out = right[:, index_out_right] + left[:, index_out_left] + eps
+
+    next_diag_pred = const * mass_in / mass_out
+
+    return next_diag_pred
