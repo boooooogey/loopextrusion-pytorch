@@ -240,3 +240,50 @@ class ForkedHead(BaseHead):
         dev = self.mixer[0].weight.device
         left_right = self.converter(tracks.to(dev), seq.to(dev))
         return self.dlem_output(diagonals, left_right[:, 0, :], left_right[:, 1, :], depth)
+
+class SimpleHead(BaseHead):
+    """This head doesn't learn anything and heavily relies on the tail.
+    """
+    def __init__(self, size:int,
+                       track_dim:int,
+                       seq_dim:int,
+                       start_diagonal:int,
+                       stop_diagonal:int,
+                       dlem_func:callable,
+                       tail:Module):
+
+        super(SimpleHead, self).__init__(size,
+                                         track_dim,
+                                         seq_dim,
+                                         start_diagonal,
+                                         stop_diagonal,
+                                         dlem_func,
+                                         tail)
+        self.norm = nn.BatchNorm1d(track_dim)
+
+        self.activation = Sigmoid()
+
+    def forward(self, diagonals:torch.Tensor,
+                      tracks:torch.Tensor,
+                      seq:torch.Tensor,
+                      depth:int) -> torch.Tensor:
+        """forward operation for the network.
+
+        Args:
+            curr_diag (ArrayLike): current diagonal. current state.
+            diag_i (int): diagonal index for the current state.
+            transform (bool, optional): Should the output converted into log space and centered.
+            Defaults to True.
+
+        Returns:
+            ArrayLike: prediction for the next state.
+        """
+        dev = next(self.parameters()).device
+        left_right = self.converter(tracks.to(dev), seq.to(dev))
+        return self.dlem_output(diagonals, left_right[:, 0, :], left_right[:, 1, :], depth)
+
+    def converter(self, tracks:torch.Tensor, seq:torch.Tensor) -> torch.Tensor:
+        """Convert the input to the left and right parameters."""
+        tracks = self.norm(tracks)
+        left_right = self.tail(torch.concatenate([tracks, seq], axis=1))
+        return self.activation(left_right)

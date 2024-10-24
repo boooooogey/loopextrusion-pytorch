@@ -1,31 +1,76 @@
+"""Training script for the DLEM model.
+"""
+import argparse
+import time
+import os
 import torch
 import numpy as np
 from torch import optim
-import os
-
+import dlem
 from dlem import util
-from dlem import load_model, load_reader
-import argparse
-import time
 
-def weighted_mse(pred, target):
+def weighted_mse(pred:torch.Tensor, target:torch.Tensor) -> torch.Tensor:
+    """Calculates the weighted mean squared error. The weights are the exponential of the target.
+
+    Args:
+        pred (torch.Tensor): prediction from the model.
+        target (torch.Tensor): target.
+
+    Returns:
+        torch.Tensor: weighted mean squared error.
+    """
     return torch.mean((pred - target)**2*torch.exp(target)
 )
+
+def get_seq_pooler(class_name:str) -> dlem.seq_pooler.SequencePooler:
+    """Imports a sequence pooler class from the seq_pooler module.
+
+    Args:
+        class_name (str): name of the sequence pooler.
+
+    Returns:
+        dlem.seq_pooler.SequencePooler: sequence pooler class
+    """
+
+    module = __import__('dlem.seq_pooler', fromlist=[class_name])
+    seqclass = getattr(module, class_name)
+    return seqclass
+
+def get_header(class_name:str) -> dlem.head.BaseHead:
+    """Imports a head class from the head module.
+
+    Args:
+        class_name (str): name of the head class.
+
+    Returns:
+        dlem.head.Head: head class
+    """
+    module = __import__('dlem.head', fromlist=[class_name])
+    headclass = getattr(module, class_name)
+    return headclass
 
 NUMBER_OF_CHANNELS_PER_ROUTE = 3
 
 parser = argparse.ArgumentParser(description='Training script')
-parser.add_argument('--data-folder', type=str, help='Data folder')
-parser.add_argument('--save-folder', type=str, help='Save folder')
+parser.add_argument('--data-folder', type=str, required=True, help='Data folder')
+parser.add_argument('--save-folder', type=str, required=True, help='Save folder')
 parser.add_argument('--batch-size', type=int, default=5, help='Batch size')
 parser.add_argument('--test-fold', type=str, default='fold4', help='Test fold')
 parser.add_argument('--val-fold', type=str, default='fold5', help='Validation fold')
 parser.add_argument('--learning-rate', type=float, default=0.0001, help='Learning rate')
 parser.add_argument('--patience', type=int, default=25, help='Patience')
 parser.add_argument('--num-epoch', type=int, default=250, help='Number of epochs')
-parser.add_argument('--seq-fea-dim', type=int, default=128, help='Sequence feature dimension')
+parser.add_argument('--head-type', type=str, default='ForkedHead',)
+parser.add_argument('--seq-pooler-type', type=str, default='SequencePoolerAttention',)
+parser.add_argument('--resolution', type=int, default=10_000, help='Resolution of the contactmap')
+parser.add_argument('--layer-channel-numbers', type=int, nargs='+', default=[4,8,8,8,8],
+                    help='Channel numbers for convolutional layers')
+parser.add_argument('--layer-strides', type=int, nargs='+', default=[10,10,10,10],
+                    help='Strides for convolutional layers')
 parser.add_argument('--loss', type=str, default='mse', choices=['mse', 'weighted_mse'],
                     help='Loss function')
+parser.add_argument('--depth', type=int, default=3,
+                    help='How further the model should be trained on')
 
 args = parser.parse_args()
 
@@ -39,17 +84,21 @@ PATIENCE = args.patience
 NUM_EPOCH = args.num_epoch
 SAVE_FOLDER = args.save_folder
 #'/data/genomes/human/Homo_sapiens/UCSC/hg38/Sequence/WholeGenomeFasta/genome.fa'
-SEQ_FEA_DIM = args.seq_fea_dim
 LOSS_TYPE = args.loss
 LR_THRESHOLD = 1.5e-7
+LAYER_CHANNEL_NUMBERS = args.layer_channel_numbers
+LAYER_STRIDES = args.layer_strides
+RES = args.resolution
+DEPTH = args.depth
 
 if not os.path.exists(SAVE_FOLDER):
     os.mkdir(SAVE_FOLDER)
 
 dev = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-data = load_reader("datareader_w_seq_memmap_index")(DATA_FOLDER,
-                                                    sub_select=np.array([1])) # only dnase
+data = dlem.dataset_dlem.CombinedDataset(dlem.dataset_dlem.SeqDataset(DATA_FOLDER),
+                                         dlem.dataset_dlem.ContactmapDataset(DATA_FOLDER, RES),
+                                         dlem.dataset_dlem.TrackDataset(DATA_FOLDER))
 
 data_test = torch.utils.data.Subset(data, np.where(data.data_folds == TEST_FOLD)[0])
 data_val = torch.utils.data.Subset(data, np.where(data.data_folds == VAL_FOLD)[0])
@@ -60,15 +109,19 @@ dataloader_test = torch.utils.data.DataLoader(data_test, batch_size = BATCH_SIZE
 dataloader_val = torch.utils.data.DataLoader(data_val, batch_size = BATCH_SIZE, shuffle=True)
 dataloader_train = torch.utils.data.DataLoader(data_train, batch_size = BATCH_SIZE, shuffle=True)
 
-index_diagonal = util.diag_index_for_mat(data.patch_dim, data.start_diag, data.stop_diag)
+index_diagonal = util.diag_index_for_mat(data.patch_dim, data.start, data.stop)
 
-model = load_model("encodetocontact_forked_seq_resconv")(
-    data.patch_dim,
-    data.feature_dim,
-    data.start_diag,
-    data.stop_diag,
-    seq_fea_dim=SEQ_FEA_DIM,
-    channel_per_route=NUMBER_OF_CHANNELS_PER_ROUTE)
+seq_pooler = get_seq_pooler(args.seq_pooler_type)(
+    LAYER_CHANNEL_NUMBERS,
+    LAYER_STRIDES)
+
+model = get_header(args.head_type)(data.patch_dim,
+                                   data.track_dim,
+                                   LAYER_CHANNEL_NUMBERS[-1],
+                                   data.start,
+                                   data.stop,
+                                   dlem.util.dlem,
+                                   seq_pooler)
 
 print(model)
 model = model.to(dev)
@@ -85,13 +138,13 @@ if LOSS_TYPE == "mse":
 else:
     loss = weighted_mse
 
-diag_init = torch.from_numpy(np.ones((BATCH_SIZE, data.patch_dim - data.start_diag),
+diag_init = torch.from_numpy(np.ones((BATCH_SIZE, data.patch_dim - data.start),
                                      dtype=np.float32) * data.patch_dim)
 
 
 best_loss = torch.inf
 best_val_loss = torch.inf
-best_corr = -1
+best_corr = -torch.inf
 mean_loss_traj_train = []
 mean_corr_traj_val = []
 mean_loss_traj_val = []
@@ -105,17 +158,19 @@ for e in range(NUM_EPOCH):
     validation_loss = []
     model.train()
     end = time.time()
-    for diagonals, tracks, seq in dataloader_train:
-        start = time.time()
-        read_times.append(start-end)
-        optimizer.zero_grad()
-        out = model(diagonals, tracks, seq)
-        total_loss = loss(out, diagonals[:, index_diagonal(data.start_diag)[-1]+1:])
-        total_loss.backward()
-        optimizer.step()
-        training_loss.append(total_loss.detach().cpu().numpy())
-        end = time.time()
-        inner_times.append(end-start)
+    for depth in range(1, DEPTH):
+        for seq, diagonals, tracks in dataloader_train:
+            start = time.time()
+            read_times.append(start-end)
+            optimizer.zero_grad()
+            out = model(diagonals, tracks, seq, depth)
+            offset = (2*data.patch_dim - 2*data.start - depth + 1) * depth // 2
+            total_loss = loss(out, diagonals[:, offset:])
+            total_loss.backward()
+            optimizer.step()
+            training_loss.append(total_loss.detach().cpu().numpy())
+            end = time.time()
+            inner_times.append(end-start)
 
     mean_total_loss = np.mean(training_loss)
     mean_loss_traj_train.append(mean_total_loss)
@@ -129,17 +184,17 @@ for e in range(NUM_EPOCH):
         model.eval()
 
         #end = time.time()
-        for diagonals, tracks, seq in dataloader_val:
+        for seq, diagonals, tracks in dataloader_val:
             #start = time.time()
             #print(f'{e}: read val: {start-end}')
             out = model.contact_map_prediction(tracks,
                                                seq,
                                                diag_init[:tracks.shape[0]])
             validation_corr.append(util.vec_corr(
-                diagonals[:, index_diagonal(data.start_diag)[-1]+1:],
+                diagonals[:, index_diagonal(data.start)[-1]+1:],
                 out
             ).detach().cpu().numpy())
-            validation_loss.append(loss(out, diagonals[:, index_diagonal(data.start_diag)[-1]+1:]))
+            validation_loss.append(loss(out, diagonals[:, index_diagonal(data.start)[-1]+1:]))
             #end = time.time()
             #print(f'{e}: inner val: {end-start}')
 
