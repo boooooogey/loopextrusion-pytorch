@@ -221,7 +221,6 @@ class ForkedHead(BaseHead):
         out = torch.cat(layer_outs, axis=1)
         return self.mixer(out)
 
-
     def forward(self, diagonals:torch.Tensor,
                       tracks:torch.Tensor,
                       seq:torch.Tensor,
@@ -287,3 +286,53 @@ class SimpleHead(BaseHead):
         tracks = self.norm(tracks)
         left_right = self.tail(torch.concatenate([tracks, seq], axis=1))
         return self.activation(left_right)
+
+class ForkedBasePairTrackHead(ForkedHead):
+    """Predict contact map from Encode signals.
+    """
+    def __init__(self, size:int,
+                       track_dim:int,
+                       seq_dim:int,
+                       start_diagonal:int,
+                       stop_diagonal:int,
+                       dlem_func:callable,
+                       tail:Module,
+                       channel_per_route:int=3,
+                       layer_num:int = 4):
+
+        output_dim = tail.channel_numbers[-1]
+
+        super(ForkedBasePairTrackHead, self).__init__(size,
+                                         1,
+                                         output_dim-1,
+                                         start_diagonal,
+                                         stop_diagonal,
+                                         dlem_func,
+                                         tail,
+                                         channel_per_route,
+                                         layer_num)
+        
+        self.raw_track_norm = nn.BatchNorm1d(track_dim)
+
+    def converter(self, tracks:torch.Tensor, seq:torch.Tensor) -> torch.Tensor:
+        """Converts the input epigenetic signals into DLEM parameters.
+
+        Args:
+            signal (ArrayLike): epigenetic tracks
+
+        Returns:
+            ArrayLike: parameters, p_l, p_r
+        """
+        layer_outs = []
+        #difference with ForkedHead is that we are using the tail for the tracks too.
+        tmp = self.tail(torch.cat([self.raw_track_norm(tracks), seq], axis=-2))
+        tmp = self.feature_batch_norm(tmp)
+        for n, conv in enumerate(self.convs):
+            tmp = conv(tmp)
+            out_tmp = tmp[:,:self.channel_per_route]
+            for trans_convs in self.trans_convs[-(n+1):]:
+                out_tmp = trans_convs(out_tmp)
+            layer_outs.append(out_tmp)
+            tmp = tmp[:,self.channel_per_route:]
+        out = torch.cat(layer_outs, axis=1)
+        return self.mixer(out)

@@ -158,19 +158,19 @@ for e in range(NUM_EPOCH):
     validation_loss = []
     model.train()
     end = time.time()
-    for depth in range(1, DEPTH):
-        for seq, diagonals, tracks in dataloader_train:
-            start = time.time()
-            read_times.append(start-end)
-            optimizer.zero_grad()
-            out = model(diagonals, tracks, seq, depth)
-            offset = (2*data.patch_dim - 2*data.start - depth + 1) * depth // 2
-            total_loss = loss(out, diagonals[:, offset:])
-            total_loss.backward()
-            optimizer.step()
-            training_loss.append(total_loss.detach().cpu().numpy())
-            end = time.time()
-            inner_times.append(end-start)
+    for seq, diagonals, tracks in dataloader_train:
+        depth = np.random.choice(range(1, DEPTH))
+        start = time.time()
+        read_times.append(start-end)
+        optimizer.zero_grad()
+        out = model(diagonals, tracks, seq, depth)
+        offset = (2*data.patch_dim - 2*data.start - depth + 1) * depth // 2
+        total_loss = loss(out, diagonals[:, offset:])
+        total_loss.backward()
+        optimizer.step()
+        training_loss.append(total_loss.detach().cpu().numpy())
+        end = time.time()
+        inner_times.append(end-start)
 
     mean_total_loss = np.mean(training_loss)
     mean_loss_traj_train.append(mean_total_loss)
