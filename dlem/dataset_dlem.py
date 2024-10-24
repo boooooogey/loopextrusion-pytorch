@@ -26,7 +26,8 @@ class DLEMDataset(torch.utils.data.Dataset, ABC):
                                  header=None)
         self.region_bed.columns = ["chr", "start", "end", "fold", "fold_index"]
 
-        self.folds = np.unique(self.region_bed.iloc[:,3].to_numpy())
+        self.folds = self.region_bed.iloc[:,3].to_numpy()
+        self.fold_labels = np.unique(self.region_bed.iloc[:,3].to_numpy()) 
         self.fold_nums = dict(self.region_bed.value_counts("fold"))
 
     @abstractmethod
@@ -59,7 +60,7 @@ class SeqDataset(DLEMDataset):
         super(SeqDataset, self).__init__(path)
 
         self.seqs = dict()
-        for fold in self.folds:
+        for fold in self.fold_labels:
             self.seqs[fold] = np.memmap(
                 os.path.join(path, f'sequences.{fold}.dat'),
                 dtype='int32',
@@ -109,7 +110,7 @@ class ContactmapDataset(DLEMDataset):
 
 
         self.contactmaps = dict()
-        for fold in self.folds:
+        for fold in self.fold_labels:
             self.contactmaps[fold] = np.memmap(
                 os.path.join(path, f"res_{self.resolution}", f'contactmaps.{fold}.dat'),
                 dtype='float32',
