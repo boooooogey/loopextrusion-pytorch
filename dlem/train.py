@@ -190,11 +190,11 @@ for e in range(NUM_EPOCH):
             out = model.contact_map_prediction(tracks,
                                                seq,
                                                diag_init[:tracks.shape[0]])
-            validation_corr.append(util.vec_corr(
-                diagonals[:, index_diagonal(data.start)[-1]+1:],
+            validation_corr.append(util.vec_corr_batch(
+                diagonals[:, index_diagonal(data.start)[-1]:],
                 out
             ).detach().cpu().numpy())
-            validation_loss.append(loss(out, diagonals[:, index_diagonal(data.start)[-1]+1:]))
+            validation_loss.append(loss(out, diagonals[:, index_diagonal(data.start)[-1]:]))
             #end = time.time()
             #print(f'{e}: inner val: {end-start}')
 
