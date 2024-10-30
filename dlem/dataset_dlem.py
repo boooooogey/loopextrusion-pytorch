@@ -2,7 +2,7 @@
 The dataset classes used in training DLEM models.
 """
 import os
-from typing import Union
+from typing import Union, List
 from abc import ABC, abstractmethod
 import pandas as pd
 import numpy as np
@@ -29,6 +29,7 @@ class DLEMDataset(torch.utils.data.Dataset, ABC):
         self.folds = self.region_bed.iloc[:,3].to_numpy()
         self.fold_labels = np.unique(self.region_bed.iloc[:,3].to_numpy()) 
         self.fold_nums = dict(self.region_bed.value_counts("fold"))
+        self.cell_lines = self.args["CELL_LINES"]
 
     @abstractmethod
     def __getitem__(self, index:int) -> ArrayLike:
@@ -36,6 +37,11 @@ class DLEMDataset(torch.utils.data.Dataset, ABC):
 
     def __len__(self)->int:
         return int(self.args["SAMPLE_NUM"])
+
+    @property
+    def cell_line_list(self) -> List[str]:
+        """return the cell lines present in the dataset"""
+        return self.cell_lines
 
     @property
     def data_folds(self) -> ArrayLike:
@@ -90,7 +96,7 @@ class SeqDataset(DLEMDataset):
 class ContactmapDataset(DLEMDataset):
     """Reads the squences from memmap. The sequences are stored as one-hot encoded.
     """
-    def __init__(self, path:str, resolution:int):
+    def __init__(self, path:str, resolution:int, select_cell_lines:Union[List[str],None]=None):
         """
         Args:
             path (str): path to the dataset where contactmaps are stored in memmap format.
@@ -98,6 +104,8 @@ class ContactmapDataset(DLEMDataset):
             vectorized form. The elements in the same diagonals are stored contiguously.
             resolution (int): resolution of the contact maps. Hopefully there are more than one
             option.
+            select_cell_lines (Union[List[str],None]): select the cell lines to be used in the
+            dataset. default is None.
         """
         super(ContactmapDataset, self).__init__(path)
         self.resolution = resolution
@@ -108,22 +116,41 @@ class ContactmapDataset(DLEMDataset):
         self.stop_diag = self.args["STOP_DIAG"] // self.resolution
         self.contact_map_edge_length = self.args["PATCH_EDGE_SIZE"] // self.resolution
 
+        if select_cell_lines is not None:
+            check_e = all(cell_line in self.args["CELL_LINES"] for cell_line in select_cell_lines)
+            check_z = len(select_cell_lines) != 0
+            assert check_e, "Cell lines not found in the dataset"
+            assert check_z, "Select at least one cell line"
+            self.cell_lines = select_cell_lines
+        else:
+            self.cell_lines = self.args["CELL_LINES"]
 
         self.contactmaps = dict()
-        for fold in self.fold_labels:
-            self.contactmaps[fold] = np.memmap(
-                os.path.join(path, f"res_{self.resolution}", f'contactmaps.{fold}.dat'),
-                dtype='float32',
-                mode = 'r',
-                shape=(self.fold_nums[fold],
-                       self.sample_size)
-            )
+        for cell_line in self.cell_lines:
+            for fold in self.fold_labels:
+                self.contactmaps[f"{cell_line}_{fold}"] = np.memmap(
+                    os.path.join(path,
+                                 cell_line,
+                                 f"res_{self.resolution}",
+                                 f'contactmaps.{fold}.dat'),
+                    dtype='float32',
+                    mode = 'r',
+                    shape=(self.fold_nums[fold],
+                        self.sample_size)
+                )
 
     def __getitem__(self, index:int) -> ArrayLike:
         fold = self.region_bed.iloc[index]["fold"]
         fold_index = self.region_bed.iloc[index]["fold_index"]
-        contactmap = np.array(self.contactmaps[fold][fold_index])
-        return contactmap
+        if len(self.cell_lines) == 1:
+            cell_line = self.cell_lines[0]
+            contactmap = np.array(self.contactmaps[f"{cell_line}_{fold}"][fold_index])
+            return contactmap
+        else:
+            contactmaps =[]
+            for cell_line in self.cell_lines:
+                contactmaps.append(np.array(self.contactmaps[f"{cell_line}_{fold}"][fold_index]))
+            return contactmaps
 
     @property
     def size(self) -> int:
@@ -148,7 +175,9 @@ class ContactmapDataset(DLEMDataset):
 class TrackDataset(DLEMDataset):
     """Reads the squences from memmap. The sequences are stored as one-hot encoded.
     """
-    def __init__(self, path:str, subselection:Union[ArrayLike, None]=None):
+    def __init__(self, path:str,
+                       subselection:Union[ArrayLike, None]=None,
+                       select_cell_lines:Union[List[str],None]=None):
         """
         Args:
             path (str): path to the dataset where tracks are stored in memmap format.
@@ -157,23 +186,54 @@ class TrackDataset(DLEMDataset):
             track_name (str): name of the track to be read.
         """
         super(TrackDataset, self).__init__(path)
-        self.track_dir = os.path.join(path, "tracks")
-        self.track_files = os.listdir(self.track_dir)
-        if subselection is not None:
-            self.track_files = self.track_files[subselection]
+        if select_cell_lines is not None:
+            check_e = all(cell_line in self.args["CELL_LINES"] for cell_line in select_cell_lines)
+            check_z = len(select_cell_lines) != 0
+            assert check_e, "Cell lines not found in the dataset"
+            assert check_z, "Select at least one cell line"
+            self.cell_lines = select_cell_lines
+        else:
+            self.cell_lines = self.args["CELL_LINES"]
 
-        self.tracks = []
-        for track in self.track_files:
-            self.tracks.append(pyBigWig.open(os.path.join(self.track_dir, track), 'r'))
+        self.track_files = dict()
+        for cell_line in self.cell_lines:
+            self.track_files[cell_line] = os.listdir(os.path.join(path,
+                                                                  cell_line,
+                                                                  "tracks"))
+        if subselection is not None:
+            for cell_line in self.cell_lines:
+                self.track_files[cell_line] = self.track_files[subselection]
+
+
+        self.tracks = dict()
+
+        for cell_line in self.cell_lines:
+            tracks = []
+            for track in self.track_files[cell_line]:
+                tracks.append(pyBigWig.open(os.path.join(self.path,
+                                                         cell_line,
+                                                         "tracks",
+                                                         track), 'r'))
+            self.tracks[cell_line] = tracks
 
     def __getitem__(self, index:int) -> ArrayLike:
         region = self.region_bed.iloc[index]
         start = region["start"]
         end = region["end"]
-        tracks = np.empty((len(self.tracks), end - start), dtype=np.float32)
-        for i, track in enumerate(self.tracks):
-            tracks[i] = np.array(track.values(region["chr"], start, end))
-        return tracks
+        if len(self.cell_lines) == 1:
+            cell_line = self.cell_lines[0]
+            tracks = np.empty((len(self.tracks[cell_line]), end - start), dtype=np.float32)
+            for i, track in enumerate(self.tracks[cell_line]):
+                tracks[i] = np.array(track.values(region["chr"], start, end))
+            return tracks
+        else:
+            tracks_all = []
+            for cell_line in self.cell_lines:
+                tracks = np.empty((len(self.tracks[cell_line]), end - start), dtype=np.float32)
+                for i, track in enumerate(self.tracks[cell_line]):
+                    tracks[i] = np.array(track.values(region["chr"], start, end))
+                tracks_all.append(tracks)
+            return tracks_all
 
     @property
     def track_name(self) -> str:
@@ -200,16 +260,31 @@ class CombinedDataset(torch.utils.data.Dataset):
             self.datasets = [seq_dataset, contactmap_dataset]
         if not all([dataset.path == self.datasets[0].path for dataset in self.datasets[1:]]):
             raise ValueError("All datasets must have the same path")
+        if len(self.datasets) == 3:
+            check_order = [cl1 == cl2 for cl1, cl2 in zip(self.datasets[1].cell_lines,
+                                                        self.datasets[2].cell_lines)]
+            if not all(check_order):
+                raise ValueError("Cell lines must be in the same order "
+                                "between contactmap and track datasets")
         self.args = self.datasets[0].args
 
     def __getitem__(self, index:int) -> ArrayLike:
         region = self.datasets[0].region_bed.iloc[index]
         if not all(region.equals(dataset.region_bed.iloc[index]) for dataset in self.datasets[1:]):
             raise ValueError("All datasets must have the same regions!")
-        return tuple(dataset[index] for dataset in self.datasets)
+        if len(self.datasets[1].cell_lines) == 1:
+            return tuple(dataset[index] for dataset in self.datasets)
+        else:
+            names_tuple = tuple([self.datasets[1].cell_lines])
+            return tuple(dataset[index] for dataset in self.datasets) + names_tuple
 
     def __len__(self)->int:
         return len(self.datasets[0])
+
+    @property
+    def cell_line_list(self) -> List[str]:
+        """return the cell lines present in the dataset"""
+        return self.datasets[1].cell_line_list
 
     @property
     def data_folds(self) -> ArrayLike:
@@ -236,4 +311,5 @@ class CombinedDataset(torch.utils.data.Dataset):
         """Number of tracks"""
         if len(self.datasets) < 3:
             return 0
-        return len(self.datasets[2].track_name)
+        cell_line = self.datasets[2].cell_lines[0]
+        return len(self.datasets[2].track_name[cell_line])

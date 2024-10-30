@@ -1,13 +1,100 @@
 """Training script for the DLEM model.
 """
 import argparse
-import time
 import os
 import torch
 import numpy as np
 from torch import optim
 import dlem
 from dlem import util
+import lightning as L
+
+class LitTrainer(L.LightningModule):
+    def __init__(self, model,
+                 learning_rate,
+                 loss,
+                 patch_dim,
+                 start,
+                 stop,
+                 depth,
+                 device):
+        super().__init__()
+        self.model = model
+        self.learning_rate = learning_rate
+        self.loss = loss
+        self.patch_dim = patch_dim
+        self.start = start
+        self.stop = stop
+        self.depth = depth
+        self.index_diagonal = util.diag_index_for_mat(self.patch_dim, self.start, self.stop)
+        self.device_model = device
+        self.model = self.model.to(self.device_model)
+
+    def training_step(self, batch, batch_idx):
+        """Training step for the model.
+        """
+        depth = np.random.choice(range(1, self.depth))
+        seq, diagonals, tracks = batch
+        batch_size = seq.shape[0]
+        out = self.model(diagonals, tracks, seq, depth)
+        offset = (2*self.patch_dim - 2*self.start - depth + 1) * depth // 2
+        total_loss = self.loss(out, diagonals[:, offset:].cpu())
+        self.log("train_loss", total_loss, batch_size=batch_size)
+
+    def test_step(self, batch, batch_idx):
+        """Test step for the model.
+        """
+        seq, diagonals, tracks, names = batch
+        batch_size = seq.shape[0]
+
+        diag_init = torch.from_numpy(np.ones((diagonals[0].shape[0], self.patch_dim - self.start),
+                                             dtype=np.float32) * self.patch_dim)
+
+        for diagonal, track, name in zip(diagonals, tracks, names):
+            out = self.model.contact_map_prediction(track,
+                                                    seq,
+                                                    diag_init[:track.shape[0]])
+            self.log(
+                f"test_corr_{name[0]}", 
+                util.vec_corr_batch(diagonal[:, self.index_diagonal(self.start)[-1]+1:].cpu(),out),
+                batch_size=batch_size
+            )
+            self.log(
+                f"test_loss_{name[0]}",
+                self.loss(out, diagonal[:, self.index_diagonal(self.start)[-1]+1:].cpu()),
+                batch_size=batch_size
+            )
+
+    def validation_step(self, batch, batch_idx):
+        """Validation step for the model.
+        """
+        seq, diagonals, tracks, names = batch
+        batch_size = seq.shape[0]
+
+        diag_init = torch.from_numpy(np.ones((diagonals[0].shape[0], self.patch_dim - self.start),
+                                             dtype=np.float32) * self.patch_dim)
+
+        for diagonal, track, name in zip(diagonals, tracks, names):
+            out = self.model.contact_map_prediction(track,
+                                                    seq,
+                                                    diag_init[:track.shape[0]])
+            self.log(
+                f"validation_corr_{name[0]}", 
+                util.vec_corr_batch(diagonal[:, self.index_diagonal(self.start)[-1]+1:].cpu(),out),
+                batch_size=batch_size
+            )
+            self.log(
+                f"validation_loss_{name[0]}",
+                self.loss(out, diagonal[:, self.index_diagonal(self.start)[-1]+1:].cpu()),
+                batch_size=batch_size
+            )
+
+    def configure_optimizers(self):
+        optimizer = optim.Adam(self.parameters(), lr=self.learning_rate)
+        return optimizer
+
+        
+    
 
 def weighted_mse(pred:torch.Tensor, target:torch.Tensor) -> torch.Tensor:
     """Calculates the weighted mean squared error. The weights are the exponential of the target.
@@ -96,138 +183,92 @@ if not os.path.exists(SAVE_FOLDER):
 
 dev = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-data = dlem.dataset_dlem.CombinedDataset(dlem.dataset_dlem.SeqDataset(DATA_FOLDER),
-                                         dlem.dataset_dlem.ContactmapDataset(DATA_FOLDER, RES),
-                                         dlem.dataset_dlem.TrackDataset(DATA_FOLDER))
+data_train = dlem.dataset_dlem.CombinedDataset(
+    dlem.dataset_dlem.SeqDataset(DATA_FOLDER),
+    dlem.dataset_dlem.ContactmapDataset(DATA_FOLDER, RES, select_cell_lines=["H1"]),
+    dlem.dataset_dlem.TrackDataset(DATA_FOLDER, select_cell_lines=["H1"]))
 
-data_test = torch.utils.data.Subset(data, np.where(data.data_folds == TEST_FOLD)[0])
-data_val = torch.utils.data.Subset(data, np.where(data.data_folds == VAL_FOLD)[0])
-data_train = torch.utils.data.Subset(data, np.where(np.logical_and(data.data_folds != VAL_FOLD,
-                                                                data.data_folds != TEST_FOLD))[0])
+data_train_sub = torch.utils.data.Subset(data_train,
+                                     np.where(
+                                         np.logical_and(data_train.data_folds != VAL_FOLD,
+                                                        data_train.data_folds != TEST_FOLD))[0])
+dataloader_train = torch.utils.data.DataLoader(data_train_sub,
+                                               batch_size = BATCH_SIZE,
+                                               shuffle=True)
 
-dataloader_test = torch.utils.data.DataLoader(data_test, batch_size = BATCH_SIZE, shuffle=True)
-dataloader_val = torch.utils.data.DataLoader(data_val, batch_size = BATCH_SIZE, shuffle=True)
-dataloader_train = torch.utils.data.DataLoader(data_train, batch_size = BATCH_SIZE, shuffle=True)
+data_val_test = dlem.dataset_dlem.CombinedDataset(
+    dlem.dataset_dlem.SeqDataset(DATA_FOLDER),
+    dlem.dataset_dlem.ContactmapDataset(DATA_FOLDER, RES),
+    dlem.dataset_dlem.TrackDataset(DATA_FOLDER))
 
-index_diagonal = util.diag_index_for_mat(data.patch_dim, data.start, data.stop)
+data_test = torch.utils.data.Subset(data_val_test,
+                                    np.where(data_val_test.data_folds == TEST_FOLD)[0])
+data_val = torch.utils.data.Subset(data_val_test,
+                                   np.where(data_val_test.data_folds == VAL_FOLD)[0])
+
+dataloader_test = torch.utils.data.DataLoader(data_test, batch_size = BATCH_SIZE, shuffle=False)
+dataloader_val = torch.utils.data.DataLoader(data_val, batch_size = BATCH_SIZE, shuffle=False)
 
 seq_pooler = get_seq_pooler(args.seq_pooler_type)(
     LAYER_CHANNEL_NUMBERS,
     LAYER_STRIDES)
 
-model = get_header(args.head_type)(data.patch_dim,
-                                   data.track_dim,
+model = get_header(args.head_type)(data_val_test.patch_dim,
+                                   data_val_test.track_dim,
                                    LAYER_CHANNEL_NUMBERS[-1],
-                                   data.start,
-                                   data.stop,
+                                   data_val_test.start,
+                                   data_val_test.stop,
                                    dlem.util.dlem,
                                    seq_pooler)
 
-print(model)
-model = model.to(dev)
+model_training = LitTrainer(model,
+                            LEARNING_RATE,
+                            weighted_mse if LOSS_TYPE == 'weighted_mse' else torch.nn.MSELoss(),
+                            data_val_test.patch_dim,
+                            data_val_test.start,
+                            data_val_test.stop,
+                            DEPTH,
+                            dev)
 
-if not os.path.exists(SAVE_FOLDER):
-    os.mkdir(SAVE_FOLDER)
+checkpoints = [
+    L.pytorch.callbacks.ModelCheckpoint(
+    monitor=f"validation_loss_{celltype}",
+    mode="min",
+    save_top_k=1,
+    save_last=True,
+    filename=f"best_validation_loss_{celltype}"
+    ) for celltype in ["H1", "HFF"]
+]
 
-optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE)
-scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=PATIENCE, mode='max')
+checkpoints += [L.pytorch.callbacks.ModelCheckpoint(
+    monitor="train_loss",
+    mode="min",
+    save_top_k=1,
+    save_last=True,
+    filename="best_train_loss")]
 
-assert LOSS_TYPE in ["mse", "weighted_mse"]
-if LOSS_TYPE == "mse":
-    loss = torch.nn.MSELoss(reduction='mean')
-else:
-    loss = weighted_mse
+checkpoints += [
+    L.pytorch.callbacks.ModelCheckpoint(
+    monitor=f"validation_corr_{celltype}",
+    mode="max",
+    save_top_k=1,
+    save_last=True,
+    filename=f"best_validation_corr_{celltype}"
+    ) for celltype in ["H1", "HFF"]
+]
 
-diag_init = torch.from_numpy(np.ones((BATCH_SIZE, data.patch_dim - data.start),
-                                     dtype=np.float32) * data.patch_dim)
+trainer = L.Trainer(limit_train_batches=10,
+                    limit_val_batches=10,
+                    accelerator="gpu",
+                    devices=1,
+                    max_epochs=10,#NUM_EPOCH,
+                    log_every_n_steps=1,
+                    default_root_dir=SAVE_FOLDER,
+                    callbacks=checkpoints
+)
 
+trainer.fit(model=model_training,
+            train_dataloaders=dataloader_train,
+            val_dataloaders=dataloader_val)
 
-best_loss = torch.inf
-best_val_loss = torch.inf
-best_corr = -torch.inf
-mean_loss_traj_train = []
-mean_corr_traj_val = []
-mean_loss_traj_val = []
-read_times = []
-inner_times = []
-model = model.to(dev)
-diag_init = diag_init.to(dev)
-for e in range(NUM_EPOCH):
-    training_loss = []
-    validation_corr = []
-    validation_loss = []
-    model.train()
-    end = time.time()
-    for seq, diagonals, tracks in dataloader_train:
-        depth = np.random.choice(range(1, DEPTH))
-        start = time.time()
-        read_times.append(start-end)
-        optimizer.zero_grad()
-        out = model(diagonals, tracks, seq, depth)
-        offset = (2*data.patch_dim - 2*data.start - depth + 1) * depth // 2
-        total_loss = loss(out, diagonals[:, offset:])
-        total_loss.backward()
-        optimizer.step()
-        training_loss.append(total_loss.detach().cpu().numpy())
-        end = time.time()
-        inner_times.append(end-start)
-
-    mean_total_loss = np.mean(training_loss)
-    mean_loss_traj_train.append(mean_total_loss)
-
-    if mean_total_loss < best_loss:
-        best_loss = mean_total_loss
-        torch.save(model.state_dict(),
-                   os.path.join(SAVE_FOLDER, "best_loss.pt"))
-
-    with torch.no_grad():
-        model.eval()
-
-        #end = time.time()
-        for seq, diagonals, tracks in dataloader_val:
-            #start = time.time()
-            #print(f'{e}: read val: {start-end}')
-            out = model.contact_map_prediction(tracks,
-                                               seq,
-                                               diag_init[:tracks.shape[0]])
-            validation_corr.append(util.vec_corr_batch(
-                diagonals[:, index_diagonal(data.start)[-1]:],
-                out
-            ).detach().cpu().numpy())
-            validation_loss.append(loss(out, diagonals[:, index_diagonal(data.start)[-1]:]))
-            #end = time.time()
-            #print(f'{e}: inner val: {end-start}')
-
-        mean_corr = np.mean(validation_corr)
-        mean_val_loss = np.mean(validation_loss)
-        mean_corr_traj_val.append(mean_corr)
-        mean_loss_traj_val.append(mean_val_loss)
-
-    if mean_corr > best_corr:
-        best_corr = mean_corr
-        torch.save(model.state_dict(),
-                   os.path.join(SAVE_FOLDER, "best_correlation.pt"))
-
-    if mean_val_loss < best_val_loss:
-        best_val_loss = mean_val_loss
-        torch.save(model.state_dict(),
-                   os.path.join(SAVE_FOLDER, "best_val_lost.pt"))
-
-    scheduler.step(mean_corr)
-    if scheduler.get_last_lr()[-1] < LR_THRESHOLD:
-        break
-
-    np.save(os.path.join(SAVE_FOLDER, "mean_loss_traj_train.npy"), mean_loss_traj_train)
-    np.save(os.path.join(SAVE_FOLDER, "mean_corr_traj_val.npy"), mean_corr_traj_val)
-    np.save(os.path.join(SAVE_FOLDER, "mean_loss_traj_val.npy"), mean_loss_traj_val)
-
-    print(f'{int((e+1)/NUM_EPOCH*100):3}/100: '
-            f'correlation = {mean_corr:.3f}, '
-            f'loss = {mean_total_loss:.3f}, '
-            f'val_loss = {mean_val_loss:.3f}',
-            flush=True, end='\r')
-
-print(f'{int((e+1)/NUM_EPOCH*100):3}/100: '
-            f'correlation = {mean_corr:.3f}, '
-            f'loss = {mean_total_loss:.3f}, '
-            f'val_loss = {mean_val_loss:.3f}')
+trainer.test(model=model_training, dataloaders=dataloader_test)
