@@ -257,11 +257,9 @@ checkpoints += [
     ) for celltype in ["H1", "HFF"]
 ]
 
-trainer = L.Trainer(limit_train_batches=10,
-                    limit_val_batches=10,
-                    accelerator="gpu",
+trainer = L.Trainer(accelerator="gpu",
                     devices=1,
-                    max_epochs=10,#NUM_EPOCH,
+                    max_epochs=NUM_EPOCH,
                     log_every_n_steps=1,
                     default_root_dir=SAVE_FOLDER,
                     callbacks=checkpoints
