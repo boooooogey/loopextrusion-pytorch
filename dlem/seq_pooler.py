@@ -144,3 +144,8 @@ class SequencePoolerAttention(SequencePooler):
         """
         return self.layers(seq)
     
+class SequencePoolerUnit(SequencePooler):
+    """It produces the left right parameters itself. So it requires a head that does not learn
+    anything but just pools the output of this module with respect to the resolution."""
+    def __init__(self, channel_numbers:List[int], stride:List[int]):
+        super(SequencePoolerUnit, self).__init__(channel_numbers, stride)

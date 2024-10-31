@@ -1,6 +1,6 @@
 """Utility functions for DLEM training and visualization
 """
-from typing import Any, Tuple, Union, List
+from typing import Any, Tuple, Union, List, Dict
 import copy
 import json
 import pandas as pd
@@ -15,6 +15,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.colors import Normalize
 from IPython.display import display, clear_output
+import pyBigWig
 
 
 def get_diags(mat:ArrayLike, i:int) -> ArrayLike:
@@ -685,3 +686,18 @@ def dlem(curr_diag:ArrayLike,
     next_diag_pred = const * mass_in / mass_out
 
     return next_diag_pred
+
+def get_stats_from_bw_chrom_separated(bw:pyBigWig.pyBigWig) -> Dict[str, Tuple[float, float]]:
+    """Get the mean and std of the signal from a bigwig file.
+
+    Args:
+        bw (pyBigWig.pyBigWig): bigwig file.
+
+    Returns:
+        Dict[str, Tuple[float, float]]: dictionary of mean and std for each chromosome.
+    """
+    stats = {}
+    for chrom in bw.chroms():
+        stats[chrom] = (bw.stats(chrom, 0, bw.chroms(chrom), type="mean", nBins=1)[0],
+                        bw.stats(chrom, 0, bw.chroms(chrom), type="std", nBins=1)[0])
+    return stats

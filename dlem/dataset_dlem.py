@@ -2,7 +2,7 @@
 The dataset classes used in training DLEM models.
 """
 import os
-from typing import Union, List
+from typing import Union, List, Tuple
 from abc import ABC, abstractmethod
 import pandas as pd
 import numpy as np
@@ -10,6 +10,12 @@ import torch
 from numpy.typing import ArrayLike
 import pyBigWig
 from dlem import util
+
+def _standardize(x:ArrayLike, stats:Union[Tuple[float, float],None]=None) -> ArrayLike:
+    if stats is None:
+        return (x - x.mean()) / x.std()
+    else:
+        return (x - stats[0]) / stats[1]
 
 class DLEMDataset(torch.utils.data.Dataset, ABC):
     """This class is the blueprint for reading contactmaps, one hot embedded sequences and tracks.
@@ -206,15 +212,19 @@ class TrackDataset(DLEMDataset):
 
 
         self.tracks = dict()
+        self.track_stats = dict()
 
         for cell_line in self.cell_lines:
             tracks = []
+            stats = []
             for track in self.track_files[cell_line]:
                 tracks.append(pyBigWig.open(os.path.join(self.path,
                                                          cell_line,
                                                          "tracks",
                                                          track), 'r'))
+                stats.append(util.get_stats_from_bw_chrom_separated(tracks[-1]))
             self.tracks[cell_line] = tracks
+            self.track_stats[cell_line] = stats
 
     def __getitem__(self, index:int) -> ArrayLike:
         region = self.region_bed.iloc[index]
@@ -223,15 +233,21 @@ class TrackDataset(DLEMDataset):
         if len(self.cell_lines) == 1:
             cell_line = self.cell_lines[0]
             tracks = np.empty((len(self.tracks[cell_line]), end - start), dtype=np.float32)
-            for i, track in enumerate(self.tracks[cell_line]):
-                tracks[i] = np.array(track.values(region["chr"], start, end))
+            for i, (track, stats) in enumerate(zip(self.tracks[cell_line],
+                                                   self.track_stats[cell_line])):
+                tmp = np.array(track.values(region["chr"], start, end))
+                tmp = np.log1p(_standardize(tmp, stats[region["chr"]]))
+                tracks[i] = tmp
             return tracks
         else:
             tracks_all = []
             for cell_line in self.cell_lines:
                 tracks = np.empty((len(self.tracks[cell_line]), end - start), dtype=np.float32)
-                for i, track in enumerate(self.tracks[cell_line]):
-                    tracks[i] = np.array(track.values(region["chr"], start, end))
+                for i, (track, stats) in enumerate(zip(self.tracks[cell_line],
+                                                       self.track_stats[cell_line])):
+                    tmp = np.array(track.values(region["chr"], start, end))
+                    tmp = np.log1p(_standardize(tmp, stats[region["chr"]]))
+                    tracks[i] = tmp
                 tracks_all.append(tracks)
             return tracks_all
 
