@@ -261,7 +261,7 @@ checkpoints += [
 trainer = L.Trainer(accelerator="gpu",
                     devices=1,
                     max_epochs=NUM_EPOCH,
-                    log_every_n_steps=1,
+                    log_every_n_steps=100,
                     default_root_dir=SAVE_FOLDER,
                     callbacks=checkpoints
 )
@@ -270,4 +270,4 @@ trainer.fit(model=model_training,
             train_dataloaders=dataloader_train,
             val_dataloaders=dataloader_val)
 
-trainer.test(model=model_training, dataloaders=dataloader_test)
+#trainer.test(model=model_training, dataloaders=dataloader_test)
