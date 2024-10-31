@@ -38,8 +38,9 @@ class LitTrainer(L.LightningModule):
         batch_size = seq.shape[0]
         out = self.model(diagonals, tracks, seq, depth)
         offset = (2*self.patch_dim - 2*self.start - depth + 1) * depth // 2
-        total_loss = self.loss(out, diagonals[:, offset:].cpu())
-        self.log("train_loss", total_loss, batch_size=batch_size)
+        loss = self.loss(out, diagonals[:, offset:].cpu())
+        self.log("train_loss", loss, batch_size=batch_size)
+        return loss
 
     def test_step(self, batch, batch_idx):
         """Test step for the model.
