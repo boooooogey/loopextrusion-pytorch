@@ -336,3 +336,40 @@ class ForkedBasePairTrackHead(ForkedHead):
             tmp = tmp[:,self.channel_per_route:]
         out = torch.cat(layer_outs, axis=1)
         return self.mixer(out)
+
+class MinHead(BaseHead):
+    """Predict contact map from Encode signals.
+    """
+    def __init__(self, size:int,
+                       track_dim:int,
+                       seq_dim:int,
+                       start_diagonal:int,
+                       stop_diagonal:int,
+                       dlem_func:callable,
+                       tail:Module,
+                       channel_per_route:int=3,
+                       layer_num:int = 4):
+
+        sample = 10
+
+        super(MinHead, self).__init__(size,
+                                      track_dim,
+                                      seq_dim,
+                                      start_diagonal,
+                                      stop_diagonal,
+                                      dlem_func,
+                                      tail)
+
+        self.pool = nn.MaxPool1d(sample)
+
+    def converter(self, tracks, seq):
+        left_right = self.tail(seq, tracks)
+        return -self.pool(-left_right)
+
+    def forward(self, diagonals:torch.Tensor,
+                      tracks:torch.Tensor,
+                      seq:torch.Tensor,
+                      depth:int) -> torch.Tensor:
+        dev = next(self.tail.parameters()).device
+        left_right = self.converter(tracks.to(dev), seq.to(dev))
+        return self.dlem_output(diagonals, left_right[:, 0, :], left_right[:, 1, :], depth)

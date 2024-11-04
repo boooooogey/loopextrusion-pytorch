@@ -1,8 +1,11 @@
 """The module for pooling features from sequence for HiC contact map prediction."""
 from abc import ABC, abstractmethod
 from typing import List
-from torch.nn import Module, Conv1d, Sequential, GELU
+import importlib.resources as pkg_resources
+from torch.nn import Module, Conv1d, ConvTranspose1d, Sequential, GELU
 import torch
+import numpy as np
+import einops
 from dlem.attentionpooling import AttentionPooling1D
 from dlem.conv1d_layers import Conv1dResidualBlock, Conv1dPoolingBlock, InterleavedConv1d
 
@@ -144,8 +147,54 @@ class SequencePoolerAttention(SequencePooler):
         """
         return self.layers(seq)
     
-class SequencePoolerUnit(SequencePooler):
-    """It produces the left right parameters itself. So it requires a head that does not learn
-    anything but just pools the output of this module with respect to the resolution."""
+class SequencePoolerCTCF(SequencePooler):
+    """Uses CTCF motif to pool the sequence features.
+
+    Args:
+        SequencePooler (_type_): _description_
+    """
     def __init__(self, channel_numbers:List[int], stride:List[int]):
-        super(SequencePoolerUnit, self).__init__(channel_numbers, stride)
+        super(SequencePoolerCTCF, self).__init__(channel_numbers, stride)
+        with pkg_resources.path("dlem", "ctcf_kernels_jaspar.npy") as path:
+            kernels = np.load(path)
+        self.ctcf_conv = Conv1d(in_channels = kernels.shape[1],
+                                out_channels = kernels.shape[0],
+                                kernel_size = kernels.shape[2],
+                                padding=kernels.shape[2]//2)
+        self.ctcf_conv.weight = torch.nn.Parameter(torch.from_numpy(kernels).float())
+        self.ctcf_conv.weight.requires_grad = False
+        self.ctcf_scale = torch.nn.Parameter(torch.ones(kernels.shape[0]), requires_grad=True)
+        self.ctcf_bias = torch.nn.Parameter(torch.zeros(1, kernels.shape[0], 1), requires_grad=True)
+
+        num_channel = 4 + kernels.shape[0]
+
+        self.conv_chrom_access = Sequential(Conv1d(in_channels=1,
+                                                   out_channels=4,
+                                                   kernel_size=kernels.shape[2],
+                                                   padding=kernels.shape[2]//2),
+                                            GELU())
+
+        self.attention_pooling = AttentionPooling1D(1000, num_channel, mode="full")
+
+        self.conv = Sequential(Conv1d(in_channels=num_channel,
+                                      out_channels=num_channel,
+                                      kernel_size=10),
+                               GELU(),
+                               ConvTranspose1d(in_channels=num_channel,
+                                               out_channels=num_channel,
+                                               kernel_size=10),
+                                GELU())
+
+        self.mix = Conv1d(in_channels=num_channel,
+                          out_channels=2,
+                          kernel_size=1)
+
+    def forward(self, seq, chrom_access):
+        x = einops.einsum(self.ctcf_conv(seq),
+                          self.ctcf_scale, "b c w, c -> b c w") + self.ctcf_bias
+
+        x = torch.concat([self.conv_chrom_access(chrom_access), x], axis=1)
+
+        x = self.attention_pooling(x)
+
+        return torch.sigmoid(self.mix(self.conv(x)+x))

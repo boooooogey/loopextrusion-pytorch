@@ -19,6 +19,7 @@ class LitTrainer(L.LightningModule):
                  depth,
                  device):
         super().__init__()
+        self.save_hyperparameters()
         self.model = model
         self.learning_rate = learning_rate
         self.loss = loss
@@ -159,6 +160,8 @@ parser.add_argument('--loss', type=str, default='mse', choices=['mse', 'weighted
                     help='Loss function')
 parser.add_argument('--depth', type=int, default=3,
                     help='How further the model should be trained on')
+parser.add_argument('--training-cell-line', type=str, default="H1",
+                    help="Select on which cell line the model will be trained on")
 
 args = parser.parse_args()
 
@@ -178,6 +181,7 @@ LAYER_CHANNEL_NUMBERS = args.layer_channel_numbers
 LAYER_STRIDES = args.layer_strides
 RES = args.resolution
 DEPTH = args.depth
+TRAIN_CELL_LINE = args.training_cell_line
 
 if not os.path.exists(SAVE_FOLDER):
     os.mkdir(SAVE_FOLDER)
@@ -186,8 +190,8 @@ dev = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 data_train = dlem.dataset_dlem.CombinedDataset(
     dlem.dataset_dlem.SeqDataset(DATA_FOLDER),
-    dlem.dataset_dlem.ContactmapDataset(DATA_FOLDER, RES, select_cell_lines=["H1"]),
-    dlem.dataset_dlem.TrackDataset(DATA_FOLDER, select_cell_lines=["H1"]))
+    dlem.dataset_dlem.ContactmapDataset(DATA_FOLDER, RES, select_cell_lines=[TRAIN_CELL_LINE]),
+    dlem.dataset_dlem.TrackDataset(DATA_FOLDER, select_cell_lines=[TRAIN_CELL_LINE]))
 
 data_train_sub = torch.utils.data.Subset(data_train,
                                      np.where(
