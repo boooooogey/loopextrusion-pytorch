@@ -283,13 +283,13 @@ def plot_results(patch:ArrayLike, pred:ArrayLike,
                                            'hspace':0,
                                            'height_ratios':[1, 5],
                                            'width_ratios':[5, 1]})
+
     axes[0, 1].remove()
-    #axes[2, 1].remove()
-    axes[0, 0].plot(np.arange(end-start), params[1][start:end])
-    #axes[1, 0].matshow(plot_mat[start:end, start:end], cmap="icefire")
     plot_pred_data_on_same_ax(plot_mat, ignore_i, ignore_i_off, axes[1, 0], cmap=cmap)
-    axes[1, 1].plot(params[0][start:end], np.arange(end-start))
-    #axes[2, 0].plot(np.arange(end-start), params[2][start:end])
+    axes[0, 0].plot(np.arange(end-start), params[0][start:end])
+    axes[0, 0].set_xlim(axes[1, 0].get_xlim())
+    axes[1, 1].plot(params[1][start:end], np.arange(end-start))
+    axes[1, 1].set_ylim(axes[1, 0].get_ylim())
 
 def train_w_signal(model:Module,
                    optimizer:Optimizer,

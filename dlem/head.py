@@ -373,3 +373,53 @@ class MinHead(BaseHead):
         dev = next(self.tail.parameters()).device
         left_right = self.converter(tracks.to(dev), seq.to(dev))
         return self.dlem_output(diagonals, left_right[:, 0, :], left_right[:, 1, :], depth)
+
+    def return_res(self,
+                   scale:float,
+                   signal:torch.Tensor,
+                   seq:torch.Tensor,
+                   init_mass:torch.Tensor) -> torch.Tensor:
+        """Produce the contact map
+
+        Args:
+            init_mass (torch.Tensor): initial mass for the algorithm to propagate. 
+
+        Returns:
+            torch.Tensor: predicted contact mass.
+        """
+        dev = next(self.parameters()).device
+        curr_diag = init_mass.to(dev)
+        stop_diagonal = int(self.stop_diagonal * scale)
+        start_diagonal = int(self.start_diagonal * scale)
+        size = int(self.size * scale)
+        out_len = int((size - (stop_diagonal + start_diagonal - 1)/2) *
+                      (stop_diagonal-start_diagonal))
+        out_len -= (size - start_diagonal)
+        indexing_out = util.diag_index_for_mat(size,
+                                               start_diagonal+1,
+                                               stop_diagonal)
+        if self.pool.kernel_size // scale == 1:
+            max_pool = nn.Identity()
+        else:
+            max_pool = nn.MaxPool1d(self.pool.kernel_size//scale)
+
+        def converter(tracks, seq):
+            left_right = self.tail(seq, tracks)
+            return -max_pool(-left_right)
+
+        with torch.no_grad():
+            left_right = converter(signal.to(dev), seq.to(dev))
+            left = left_right[:, 0, :]
+            right = left_right[:, 1, :]
+            out = torch.empty((init_mass.shape[0], out_len), device="cpu")
+            for index_diag in range(start_diagonal, stop_diagonal-1):
+                curr_diag = self.dlem(curr_diag,
+                                      left,
+                                      right,
+                                      self.const,
+                                      size)
+                normed_diag = torch.log(curr_diag)
+                normed_diag = normed_diag - normed_diag.mean(axis=1, keepdim=True)
+                curr_diag = torch.exp(normed_diag)
+                out[:, indexing_out(index_diag+1)] = normed_diag.cpu()
+        return out, left_right

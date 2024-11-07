@@ -34,18 +34,26 @@ class LitTrainer(L.LightningModule):
     def training_step(self, batch, batch_idx):
         """Training step for the model.
         """
+
+        if next(self.model.parameters()).device != self.device_model:
+            self.model = self.model.to(self.device_model)
+
         depth = np.random.choice(range(1, self.depth))
         seq, diagonals, tracks = batch
         batch_size = seq.shape[0]
         out = self.model(diagonals, tracks, seq, depth)
         offset = (2*self.patch_dim - 2*self.start - depth + 1) * depth // 2
-        loss = self.loss(out, diagonals[:, offset:].cpu())
+        loss = self.loss(out, diagonals[:, offset:])
         self.log("train_loss", loss, batch_size=batch_size)
         return loss
 
     def test_step(self, batch, batch_idx):
         """Test step for the model.
         """
+
+        if next(self.model.parameters()).device != self.device_model:
+            self.model = self.model.to(self.device_model)
+
         seq, diagonals, tracks, names = batch
         batch_size = seq.shape[0]
 
@@ -70,6 +78,10 @@ class LitTrainer(L.LightningModule):
     def validation_step(self, batch, batch_idx):
         """Validation step for the model.
         """
+
+        if next(self.model.parameters()).device != self.device_model:
+            self.model = self.model.to(self.device_model)
+
         seq, diagonals, tracks, names = batch
         batch_size = seq.shape[0]
 
@@ -186,7 +198,7 @@ TRAIN_CELL_LINE = args.training_cell_line
 if not os.path.exists(SAVE_FOLDER):
     os.mkdir(SAVE_FOLDER)
 
-dev = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+dev = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 data_train = dlem.dataset_dlem.CombinedDataset(
     dlem.dataset_dlem.SeqDataset(DATA_FOLDER),
@@ -262,7 +274,7 @@ checkpoints += [
     ) for celltype in ["H1", "HFF"]
 ]
 
-trainer = L.Trainer(accelerator="gpu",
+trainer = L.Trainer(accelerator="cpu",
                     devices=1,
                     max_epochs=NUM_EPOCH,
                     log_every_n_steps=100,

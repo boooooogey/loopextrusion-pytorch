@@ -2,7 +2,7 @@
 from abc import ABC, abstractmethod
 from typing import List
 import importlib.resources as pkg_resources
-from torch.nn import Module, Conv1d, ConvTranspose1d, Sequential, GELU
+from torch.nn import Module, Conv1d, ConvTranspose1d, Sequential, GELU, ModuleList
 import torch
 import numpy as np
 import einops
@@ -166,30 +166,39 @@ class SequencePoolerCTCF(SequencePooler):
         self.ctcf_scale = torch.nn.Parameter(torch.ones(kernels.shape[0]), requires_grad=True)
         self.ctcf_bias = torch.nn.Parameter(torch.zeros(1, kernels.shape[0], 1), requires_grad=True)
 
-        num_channel = 4 + kernels.shape[0]
+        #num_channel = 4 + kernels.shape[0]
 
-        self.conv_chrom_access = Sequential(Conv1d(in_channels=1,
-                                                   out_channels=4,
-                                                   kernel_size=kernels.shape[2],
-                                                   padding=kernels.shape[2]//2),
+        self.conv_chrom_access = Sequential(Conv1d(
+            in_channels=1,
+            out_channels=self.channel_numbers[0] - kernels.shape[0],
+            kernel_size=kernels.shape[2],
+            padding=kernels.shape[2]//2),
                                             GELU())
 
-        self.attention_pooling = AttentionPooling1D(1000, num_channel, mode="full")
+        self.attention_pooling = AttentionPooling1D(1000, self.channel_numbers[0], mode="full")
 
-        self.conv = Sequential(Conv1d(in_channels=num_channel,
-                                      out_channels=num_channel,
-                                      kernel_size=10),
-                               GELU(),
-                               ConvTranspose1d(in_channels=num_channel,
-                                               out_channels=num_channel,
-                                               kernel_size=10),
-                                GELU())
+        layers = []
+        for cn, st in zip(self.channel_numbers, self.stride):
+            layers.append(Sequential(Conv1d(in_channels=cn,
+                                      out_channels=cn,
+                                      kernel_size=st),
+                                     GELU()))
+        self.conv_forward = ModuleList(layers)
+        layers = []
+        for cn, st in zip(self.channel_numbers, self.stride):
+            layers.append(Sequential(ConvTranspose1d(in_channels=cn,
+                                      out_channels=cn,
+                                      kernel_size=st),
+                                     GELU()))
 
-        self.mix = Conv1d(in_channels=num_channel,
+        self.conv_backward = ModuleList(layers)
+
+        self.mix = Conv1d(in_channels=self.channel_numbers[-1],
                           out_channels=2,
                           kernel_size=1)
 
     def forward(self, seq, chrom_access):
+
         x = einops.einsum(self.ctcf_conv(seq),
                           self.ctcf_scale, "b c w, c -> b c w") + self.ctcf_bias
 
@@ -197,4 +206,11 @@ class SequencePoolerCTCF(SequencePooler):
 
         x = self.attention_pooling(x)
 
-        return torch.sigmoid(self.mix(self.conv(x)+x))
+        forward_pass = [x]
+        for layer in self.conv_forward[:-1]:
+            x = layer(x)
+            forward_pass.append(x)
+        x = self.conv_forward[-1](x)
+        for fp, layer in zip(forward_pass[::-1], self.conv_backward):
+            x = layer(x) + fp
+        return torch.sigmoid(self.mix(x))
