@@ -224,25 +224,27 @@ class SequencePoolerSuperRes(SequencePooler):
     def __init__(self, channel_numbers:List[int], stride:List[int]):
         super(SequencePoolerSuperRes, self).__init__(channel_numbers, stride)
         self.from_seq = Conv1d(in_channels = 4,
-                               out_channels = 6,
+                               out_channels = 10,
                                kernel_size = 3,
                                padding=3//2)
 
         self.conv_chrom_access = Conv1d(in_channels=1,
-                                        out_channels=4,
+                                        out_channels=5,
                                         kernel_size=3,
                                         padding=3//2)
+
+        self.pooling_feature_num = 15
 
         self.conv = ModuleList([
             Sequential(
                 GELU(),
-                BatchNorm1d(10),
-                Conv1d(in_channels=10, out_channels=10, kernel_size=3, padding=3//2)
+                BatchNorm1d(self.pooling_feature_num),
+                Conv1d(in_channels=self.pooling_feature_num, out_channels=self.pooling_feature_num, kernel_size=3, padding=3//2)
             )]*3)
 
-        self.pool= ModuleList([AttentionPooling1D(10, 10, mode="full")]*3)
+        self.pool= ModuleList([AttentionPooling1D(10, self.pooling_feature_num, mode="full")]*3)
 
-        self.channel_numbers[0] = 10
+        self.channel_numbers[0] = self.pooling_feature_num
         
         layers = []
         for cn, st in zip(self.channel_numbers, self.stride):
