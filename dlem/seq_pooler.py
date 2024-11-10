@@ -2,7 +2,7 @@
 from abc import ABC, abstractmethod
 from typing import List
 import importlib.resources as pkg_resources
-from torch.nn import Module, Conv1d, ConvTranspose1d, Sequential, GELU, ModuleList
+from torch.nn import Module, Conv1d, ConvTranspose1d, Sequential, GELU, ModuleList, BatchNorm1d
 import torch
 import numpy as np
 import einops
@@ -205,6 +205,73 @@ class SequencePoolerCTCF(SequencePooler):
         x = torch.concat([self.conv_chrom_access(chrom_access), x], axis=1)
 
         x = self.attention_pooling(x)
+
+        forward_pass = [x]
+        for layer in self.conv_forward[:-1]:
+            x = layer(x)
+            forward_pass.append(x)
+        x = self.conv_forward[-1](x)
+        for fp, layer in zip(forward_pass[::-1], self.conv_backward):
+            x = layer(x) + fp
+        return torch.sigmoid(self.mix(x))
+
+class SequencePoolerSuperRes(SequencePooler):
+    """Uses CTCF motif to pool the sequence features.
+
+    Args:
+        SequencePooler (_type_): _description_
+    """
+    def __init__(self, channel_numbers:List[int], stride:List[int]):
+        super(SequencePoolerSuperRes, self).__init__(channel_numbers, stride)
+        self.from_seq = Conv1d(in_channels = 4,
+                               out_channels = 6,
+                               kernel_size = 3,
+                               padding=3//2)
+
+        self.conv_chrom_access = Conv1d(in_channels=1,
+                                        out_channels=4,
+                                        kernel_size=3,
+                                        padding=3//2)
+
+        self.conv = ModuleList([
+            Sequential(
+                GELU(),
+                BatchNorm1d(10),
+                Conv1d(in_channels=10, out_channels=10, kernel_size=3, padding=3//2)
+            )]*3)
+
+        self.pool= ModuleList([AttentionPooling1D(10, 10, mode="full")]*3)
+
+        self.channel_numbers[0] = 10
+        
+        layers = []
+        for cn, st in zip(self.channel_numbers, self.stride):
+            layers.append(Sequential(Conv1d(in_channels=cn,
+                                      out_channels=cn,
+                                      kernel_size=st),
+                                     GELU()))
+        self.conv_forward = ModuleList(layers)
+        layers = []
+        for cn, st in zip(self.channel_numbers, self.stride):
+            layers.append(Sequential(ConvTranspose1d(in_channels=cn,
+                                      out_channels=cn,
+                                      kernel_size=st),
+                                     GELU()))
+
+        self.conv_backward = ModuleList(layers)
+
+        self.mix = Conv1d(in_channels=self.channel_numbers[-1],
+                          out_channels=2,
+                          kernel_size=1)
+
+    def forward(self, seq, chrom_access):
+
+        x = self.from_seq(seq)
+
+        x = torch.concat([self.conv_chrom_access(chrom_access), x], axis=1)
+
+        for layer, pool in zip(self.conv, self.pool):
+            x = pool(layer(x) + x)
 
         forward_pass = [x]
         for layer in self.conv_forward[:-1]:
