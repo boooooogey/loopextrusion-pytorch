@@ -239,6 +239,9 @@ class SequencePoolerSuperRes(SequencePooler):
             Sequential(
                 GELU(),
                 BatchNorm1d(self.pooling_feature_num),
+                Conv1d(in_channels=self.pooling_feature_num, out_channels=self.pooling_feature_num, kernel_size=3, padding=3//2),
+                GELU(),
+                BatchNorm1d(self.pooling_feature_num),
                 Conv1d(in_channels=self.pooling_feature_num, out_channels=self.pooling_feature_num, kernel_size=3, padding=3//2)
             )]*3)
 
