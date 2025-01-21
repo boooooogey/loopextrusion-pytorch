@@ -174,6 +174,7 @@ parser.add_argument('--depth', type=int, default=3,
                     help='How further the model should be trained on')
 parser.add_argument('--training-cell-line', type=str, default="H1",
                     help="Select on which cell line the model will be trained on")
+parser.add_argument('--use-seq-feat', action='store_true', help='Use sequence features instead of sequence')
 
 args = parser.parse_args()
 
@@ -194,14 +195,17 @@ LAYER_STRIDES = args.layer_strides
 RES = args.resolution
 DEPTH = args.depth
 TRAIN_CELL_LINE = args.training_cell_line
+USE_SEQ_FEA = args.use_seq_feat
 
 if not os.path.exists(SAVE_FOLDER):
     os.mkdir(SAVE_FOLDER)
 
 dev = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
+SeqDataset = dlem.dataset_dlem.SeqFeatureDataset if USE_SEQ_FEA else dlem.dataset_dlem.SeqDataset
+
 data_train = dlem.dataset_dlem.CombinedDataset(
-    dlem.dataset_dlem.SeqDataset(DATA_FOLDER),
+    SeqDataset(DATA_FOLDER),
     dlem.dataset_dlem.ContactmapDataset(DATA_FOLDER, RES, select_cell_lines=[TRAIN_CELL_LINE]),
     dlem.dataset_dlem.TrackDataset(DATA_FOLDER, select_cell_lines=[TRAIN_CELL_LINE]))
 
@@ -214,7 +218,7 @@ dataloader_train = torch.utils.data.DataLoader(data_train_sub,
                                                shuffle=True)
 
 data_val_test = dlem.dataset_dlem.CombinedDataset(
-    dlem.dataset_dlem.SeqDataset(DATA_FOLDER),
+    SeqDataset(DATA_FOLDER),
     dlem.dataset_dlem.ContactmapDataset(DATA_FOLDER, RES),
     dlem.dataset_dlem.TrackDataset(DATA_FOLDER))
 

@@ -99,6 +99,36 @@ class SeqDataset(DLEMDataset):
         one_hot_emb = torch.from_numpy(one_hot_emb)
         return one_hot_emb
 
+class SeqFeatureDataset(DLEMDataset):
+    """Reads sequence features from bigwig files."""
+    def __init__(self, path:str, shift:int=0):
+        super().__init__(path)
+        self.shift = shift
+        self.seq_fea_files = os.listdir(os.path.join(path,
+                                                     "seq_features"))
+
+        self.tracks = []
+        self.track_stats = []
+
+        for track in self.seq_fea_files:
+            self.tracks.append(pyBigWig.open(os.path.join(self.path,
+                                                          "seq_features",
+                                                          track), 'r'))
+            self.track_stats.append(util.get_stats_from_bw_chrom_separated(self.tracks[-1]))
+
+    def __getitem__(self, index:int) -> ArrayLike:
+        region = self.region_bed.iloc[index]
+        start = region["start"]
+        end = region["end"]
+        tracks = np.empty((len(self.tracks), end - start), dtype=np.float32)
+        for i, (track, stats) in enumerate(zip(self.tracks,
+                                                self.track_stats)):
+            tmp = np.array(track.values(region["chr"], start, end))
+            tmp = np.log1p(_standardize(tmp, stats[region["chr"]]))
+            tmp[np.isnan(tmp)] = 0
+            tracks[i] = tmp
+        return tracks
+
 class ContactmapDataset(DLEMDataset):
     """Reads the squences from memmap. The sequences are stored as one-hot encoded.
     """
