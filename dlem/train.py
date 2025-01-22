@@ -174,7 +174,9 @@ parser.add_argument('--depth', type=int, default=3,
                     help='How further the model should be trained on')
 parser.add_argument('--training-cell-line', type=str, default="H1",
                     help="Select on which cell line the model will be trained on")
-parser.add_argument('--use-seq-feat', action='store_true', help='Use sequence features instead of sequence')
+parser.add_argument('--use-seq-feat', action='store_true',
+                    help='Use sequence features instead of sequence')
+parser.add_argument('--number-of-channel-per-route', type=int, default=3)
 
 args = parser.parse_args()
 
@@ -196,6 +198,7 @@ RES = args.resolution
 DEPTH = args.depth
 TRAIN_CELL_LINE = args.training_cell_line
 USE_SEQ_FEA = args.use_seq_feat
+NUMBER_OF_CHANNELS_PER_ROUTE = args.number_of_channel_per_route
 
 if not os.path.exists(SAVE_FOLDER):
     os.mkdir(SAVE_FOLDER)
@@ -240,7 +243,8 @@ model = get_header(args.head_type)(data_val_test.patch_dim,
                                    data_val_test.start,
                                    data_val_test.stop,
                                    dlem.util.dlem,
-                                   seq_pooler)
+                                   seq_pooler,
+                                   channel_per_route=NUMBER_OF_CHANNELS_PER_ROUTE)
 
 model_training = LitTrainer(model,
                             LEARNING_RATE,
