@@ -701,3 +701,17 @@ def get_stats_from_bw_chrom_separated(bw:pyBigWig.pyBigWig) -> Dict[str, Tuple[f
         stats[chrom] = (bw.stats(chrom, 0, bw.chroms(chrom), type="mean", nBins=1)[0],
                         bw.stats(chrom, 0, bw.chroms(chrom), type="std", nBins=1)[0])
     return stats
+
+def pairwise_corrcoef(x:ArrayLike, y:ArrayLike) -> ArrayLike:
+    """Calculate pairwise correlation coefficient.
+
+    Args:
+        x (ArrayLike): first matrix.
+        y (ArrayLike): second matrix
+
+    Returns:
+        ArrayLike: correlation coefficients between the rows of x and y.
+    """
+    x = (x - x.mean(dim=1, keepdim=True))/(x.std(dim=1, keepdim=True))
+    y = (y - y.mean(dim=1, keepdim=True))/(y.std(dim=1, keepdim=True))
+    return (x * y).mean(dim=1)

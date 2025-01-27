@@ -8,6 +8,7 @@ from torch import optim
 import dlem
 from dlem import util
 import lightning as L
+from IPython import embed
 
 class LitTrainer(L.LightningModule):
     def __init__(self, model,
@@ -30,6 +31,7 @@ class LitTrainer(L.LightningModule):
         self.index_diagonal = util.diag_index_for_mat(self.patch_dim, self.start, self.stop)
         self.device_model = device
         self.model = self.model.to(self.device_model)
+        self._all_the_metrics = dict()
 
     def training_step(self, batch, batch_idx):
         """Training step for the model.
@@ -88,19 +90,48 @@ class LitTrainer(L.LightningModule):
         diag_init = torch.from_numpy(np.ones((diagonals[0].shape[0], self.patch_dim - self.start),
                                              dtype=np.float32) * self.patch_dim)
 
+        print(batch_size)
+
+        preds = []
         for diagonal, track, name in zip(diagonals, tracks, names):
+            diagonal = diagonal[:, self.index_diagonal(self.start)[-1]+1:].cpu()
             out = self.model.contact_map_prediction(track,
                                                     seq,
                                                     diag_init[:track.shape[0]])
+            preds.append(out)
+            corr = util.pairwise_corrcoef(out,
+                                          diagonal)
+            loss = self.loss(out, diagonal),
+
+            if f"validation_corr_{name[0]}" not in self._all_the_metrics:
+                self._all_the_metrics[f"validation_corr_{name[0]}"] = [corr]
+            else:
+                self._all_the_metrics[f"validation_corr_{name[0]}"].append(corr)
+
+            if f"validation_loss_{name[0]}" not in self._all_the_metrics:
+                self._all_the_metrics[f"validation_loss_{name[0]}"] = [loss[0]]
+            else:
+                self._all_the_metrics[f"validation_loss_{name[0]}"].append(loss[0])
+        diff_diag = diagonals[0][:, self.index_diagonal(self.start)[-1]+1:].cpu()
+        diff_diag -= diagonals[1][:, self.index_diagonal(self.start)[-1]+1:].cpu()
+        corr = util.pairwise_corrcoef(preds[0]-preds[1], diff_diag)
+        if "validation_corr_diff" not in self._all_the_metrics:
+            self._all_the_metrics["validation_corr_diff"] = [corr]
+        else:
+            self._all_the_metrics["validation_corr_diff"].append(corr)
+
+    def on_validation_epoch_start(self):
+        self._all_the_metrics = dict()
+
+    def on_validation_epoch_end(self):
+        for key in self._all_the_metrics:
+            if "loss" in key:
+                self._all_the_metrics[key] = torch.Tensor(self._all_the_metrics[key]).mean()
+            else:
+                self._all_the_metrics[key] = torch.concat(self._all_the_metrics[key]).mean()
             self.log(
-                f"validation_corr_{name[0]}", 
-                util.vec_corr_batch(diagonal[:, self.index_diagonal(self.start)[-1]+1:].cpu(),out),
-                batch_size=batch_size
-            )
-            self.log(
-                f"validation_loss_{name[0]}",
-                self.loss(out, diagonal[:, self.index_diagonal(self.start)[-1]+1:].cpu()),
-                batch_size=batch_size
+                key,
+                self._all_the_metrics[key],
             )
 
     def configure_optimizers(self):
@@ -120,8 +151,7 @@ def weighted_mse(pred:torch.Tensor, target:torch.Tensor) -> torch.Tensor:
     Returns:
         torch.Tensor: weighted mean squared error.
     """
-    return torch.mean((pred - target)**2*torch.exp(target)
-)
+    return torch.mean((pred - target)**2*torch.exp(target))
 
 def get_seq_pooler(class_name:str) -> dlem.seq_pooler.SequencePooler:
     """Imports a sequence pooler class from the seq_pooler module.
