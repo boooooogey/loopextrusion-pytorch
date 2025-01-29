@@ -114,7 +114,7 @@ data_train = dlem.dataset_dlem.CombinedDataset(
 data_train_sub = torch.utils.data.Subset(data_train,
                                      np.where(
                                          np.logical_and(data_train.data_folds != VAL_FOLD,
-                                                        data_train.data_folds != TEST_FOLD))[0][:10])
+                                                        data_train.data_folds != TEST_FOLD))[0])
 dataloader_train = torch.utils.data.DataLoader(data_train_sub,
                                                batch_size = BATCH_SIZE,
                                                shuffle=True)
@@ -125,9 +125,9 @@ data_val_test = dlem.dataset_dlem.CombinedDataset(
     dlem.dataset_dlem.TrackDataset(DATA_FOLDER))
 
 data_test = torch.utils.data.Subset(data_val_test,
-                                    np.where(data_val_test.data_folds == TEST_FOLD)[0][:10])
+                                    np.where(data_val_test.data_folds == TEST_FOLD)[0])
 data_val = torch.utils.data.Subset(data_val_test,
-                                   np.where(data_val_test.data_folds == VAL_FOLD)[0][:10])
+                                   np.where(data_val_test.data_folds == VAL_FOLD)[0])
 
 dataloader_test = torch.utils.data.DataLoader(data_test, batch_size = BATCH_SIZE, shuffle=False)
 dataloader_val = torch.utils.data.DataLoader(data_val, batch_size = BATCH_SIZE, shuffle=False)
