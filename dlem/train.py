@@ -114,7 +114,7 @@ data_train = dlem.dataset_dlem.CombinedDataset(
 data_train_sub = torch.utils.data.Subset(data_train,
                                      np.where(
                                          np.logical_and(data_train.data_folds != VAL_FOLD,
-                                                        data_train.data_folds != TEST_FOLD))[0])
+                                                        data_train.data_folds != TEST_FOLD))[0][:10])
 dataloader_train = torch.utils.data.DataLoader(data_train_sub,
                                                batch_size = BATCH_SIZE,
                                                shuffle=True)
@@ -125,9 +125,9 @@ data_val_test = dlem.dataset_dlem.CombinedDataset(
     dlem.dataset_dlem.TrackDataset(DATA_FOLDER))
 
 data_test = torch.utils.data.Subset(data_val_test,
-                                    np.where(data_val_test.data_folds == TEST_FOLD)[0])
+                                    np.where(data_val_test.data_folds == TEST_FOLD)[0][:10])
 data_val = torch.utils.data.Subset(data_val_test,
-                                   np.where(data_val_test.data_folds == VAL_FOLD)[0])
+                                   np.where(data_val_test.data_folds == VAL_FOLD)[0][:10])
 
 dataloader_test = torch.utils.data.DataLoader(data_test, batch_size = BATCH_SIZE, shuffle=False)
 dataloader_val = torch.utils.data.DataLoader(data_val, batch_size = BATCH_SIZE, shuffle=False)
@@ -160,7 +160,8 @@ checkpoints = [
     mode="min",
     save_top_k=1,
     save_last=True,
-    filename=f"best_validation_loss_{celltype}"
+    filename=f"best_validation_loss_{celltype}",
+    dirpath=SAVE_FOLDER
     ) for celltype in ["H1", "HFF"]
 ]
 
@@ -169,7 +170,9 @@ checkpoints += [L.pytorch.callbacks.ModelCheckpoint(
     mode="min",
     save_top_k=1,
     save_last=True,
-    filename="best_train_loss")]
+    filename="best_train_loss",
+    dirpath=SAVE_FOLDER
+)]
 
 checkpoints += [
     L.pytorch.callbacks.ModelCheckpoint(
@@ -177,7 +180,8 @@ checkpoints += [
     mode="max",
     save_top_k=1,
     save_last=True,
-    filename=f"best_validation_corr_{celltype}"
+    filename=f"best_validation_corr_{celltype}",
+    dirpath=SAVE_FOLDER
     ) for celltype in ["H1", "HFF"]
 ]
 
@@ -187,11 +191,13 @@ checkpoints += [
     mode="max",
     save_top_k=1,
     save_last=True,
-    filename="best_validation_corr_diff")
+    filename="best_validation_corr_diff",
+    dirpath=SAVE_FOLDER)
 ]
 
 wandb.login(key="d4cd96eb50ccb5168c4b750d269715d2cfbd8e44")
-wandb_logger = WandbLogger()
+wandb_logger = WandbLogger(name=f"cell_line_{TRAIN_CELL_LINE}_channel_per_route_{NUMBER_OF_CHANNELS_PER_ROUTE}_seq_pooler_{args.seq_pooler_type}_head_{args.head_type}_loss_{LOSS_TYPE}_lr_{LEARNING_RATE}_depth_{DEPTH}",
+                           save_dir=SAVE_FOLDER)
 
 trainer = L.Trainer(accelerator="cpu",
                     devices=1,
