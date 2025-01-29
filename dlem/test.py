@@ -1,15 +1,9 @@
 """Testing DLEM on provided dataset.
 """
 import argparse
-import os
 import torch
-import numpy as np
-from torch import optim
-import dlem
-from dlem import util
 import lightning as L
-from IPython import embed
-from tqdm import tqdm
+import dlem
 from dlem.trainer import LitTrainer
 
 def get_seq_pooler(class_name:str) -> dlem.seq_pooler.SequencePooler:

@@ -1,6 +1,5 @@
 """Contains Pytorch Lightning trainer class for DLEM.
 """
-import os
 import lightning as L
 import numpy as np
 import pandas as pd
@@ -103,7 +102,7 @@ class LitTrainer(L.LightningModule):
         """
         metrics = self.evalution_step(batch)
         for key, val in metrics.items():
-            if key not in self._all_the_metrics_test:
+            if "test_" + key not in self._all_the_metrics_test:
                 self._all_the_metrics_test["test_" + key] = [val]
             else:
                 self._all_the_metrics_test["test_" + key].append(val)
@@ -139,7 +138,7 @@ class LitTrainer(L.LightningModule):
         """
         metrics = self.evalution_step(batch)
         for key, val in metrics.items():
-            if key not in self._all_the_metrics_val:
+            if "validation_" + key not in self._all_the_metrics_val:
                 self._all_the_metrics_val["validation_" + key] = [val]
             else:
                 self._all_the_metrics_val["validation_" + key].append(val)
