@@ -4,142 +4,11 @@ import argparse
 import os
 import torch
 import numpy as np
-from torch import optim
-import dlem
-from dlem import util
 import lightning as L
-from IPython import embed
-
-class LitTrainer(L.LightningModule):
-    def __init__(self, model,
-                 learning_rate,
-                 loss,
-                 patch_dim,
-                 start,
-                 stop,
-                 depth,
-                 device):
-        super().__init__()
-        self.save_hyperparameters()
-        self.model = model
-        self.learning_rate = learning_rate
-        self.loss = loss
-        self.patch_dim = patch_dim
-        self.start = start
-        self.stop = stop
-        self.depth = depth
-        self.index_diagonal = util.diag_index_for_mat(self.patch_dim, self.start, self.stop)
-        self.device_model = device
-        self.model = self.model.to(self.device_model)
-        self._all_the_metrics = dict()
-
-    def training_step(self, batch, batch_idx):
-        """Training step for the model.
-        """
-
-        if next(self.model.parameters()).device != self.device_model:
-            self.model = self.model.to(self.device_model)
-
-        depth = np.random.choice(range(1, self.depth))
-        seq, diagonals, tracks = batch
-        batch_size = seq.shape[0]
-        out = self.model(diagonals, tracks, seq, depth)
-        offset = (2*self.patch_dim - 2*self.start - depth + 1) * depth // 2
-        loss = self.loss(out, diagonals[:, offset:])
-        self.log("train_loss", loss, batch_size=batch_size)
-        return loss
-
-    def test_step(self, batch, batch_idx):
-        """Test step for the model.
-        """
-
-        if next(self.model.parameters()).device != self.device_model:
-            self.model = self.model.to(self.device_model)
-
-        seq, diagonals, tracks, names = batch
-        batch_size = seq.shape[0]
-
-        diag_init = torch.from_numpy(np.ones((diagonals[0].shape[0], self.patch_dim - self.start),
-                                             dtype=np.float32) * self.patch_dim)
-
-        for diagonal, track, name in zip(diagonals, tracks, names):
-            out = self.model.contact_map_prediction(track,
-                                                    seq,
-                                                    diag_init[:track.shape[0]])
-            self.log(
-                f"test_corr_{name[0]}", 
-                util.vec_corr_batch(diagonal[:, self.index_diagonal(self.start)[-1]+1:].cpu(),out),
-                batch_size=batch_size
-            )
-            self.log(
-                f"test_loss_{name[0]}",
-                self.loss(out, diagonal[:, self.index_diagonal(self.start)[-1]+1:].cpu()),
-                batch_size=batch_size
-            )
-
-    def validation_step(self, batch, batch_idx):
-        """Validation step for the model.
-        """
-
-        if next(self.model.parameters()).device != self.device_model:
-            self.model = self.model.to(self.device_model)
-
-        seq, diagonals, tracks, names = batch
-        batch_size = seq.shape[0]
-
-        diag_init = torch.from_numpy(np.ones((diagonals[0].shape[0], self.patch_dim - self.start),
-                                             dtype=np.float32) * self.patch_dim)
-
-        print(batch_size)
-
-        preds = []
-        for diagonal, track, name in zip(diagonals, tracks, names):
-            diagonal = diagonal[:, self.index_diagonal(self.start)[-1]+1:].cpu()
-            out = self.model.contact_map_prediction(track,
-                                                    seq,
-                                                    diag_init[:track.shape[0]])
-            preds.append(out)
-            corr = util.pairwise_corrcoef(out,
-                                          diagonal)
-            loss = self.loss(out, diagonal),
-
-            if f"validation_corr_{name[0]}" not in self._all_the_metrics:
-                self._all_the_metrics[f"validation_corr_{name[0]}"] = [corr]
-            else:
-                self._all_the_metrics[f"validation_corr_{name[0]}"].append(corr)
-
-            if f"validation_loss_{name[0]}" not in self._all_the_metrics:
-                self._all_the_metrics[f"validation_loss_{name[0]}"] = [loss[0]]
-            else:
-                self._all_the_metrics[f"validation_loss_{name[0]}"].append(loss[0])
-        diff_diag = diagonals[0][:, self.index_diagonal(self.start)[-1]+1:].cpu()
-        diff_diag -= diagonals[1][:, self.index_diagonal(self.start)[-1]+1:].cpu()
-        corr = util.pairwise_corrcoef(preds[0]-preds[1], diff_diag)
-        if "validation_corr_diff" not in self._all_the_metrics:
-            self._all_the_metrics["validation_corr_diff"] = [corr]
-        else:
-            self._all_the_metrics["validation_corr_diff"].append(corr)
-
-    def on_validation_epoch_start(self):
-        self._all_the_metrics = dict()
-
-    def on_validation_epoch_end(self):
-        for key in self._all_the_metrics:
-            if "loss" in key:
-                self._all_the_metrics[key] = torch.Tensor(self._all_the_metrics[key]).mean()
-            else:
-                self._all_the_metrics[key] = torch.concat(self._all_the_metrics[key]).mean()
-            self.log(
-                key,
-                self._all_the_metrics[key],
-            )
-
-    def configure_optimizers(self):
-        optimizer = optim.Adam(self.parameters(), lr=self.learning_rate)
-        return optimizer
-
-        
-    
+from lightning.pytorch.loggers import WandbLogger
+import wandb
+import dlem
+from dlem.trainer import LitTrainer
 
 def weighted_mse(pred:torch.Tensor, target:torch.Tensor) -> torch.Tensor:
     """Calculates the weighted mean squared error. The weights are the exponential of the target.
@@ -245,7 +114,7 @@ data_train = dlem.dataset_dlem.CombinedDataset(
 data_train_sub = torch.utils.data.Subset(data_train,
                                      np.where(
                                          np.logical_and(data_train.data_folds != VAL_FOLD,
-                                                        data_train.data_folds != TEST_FOLD))[0])
+                                                        data_train.data_folds != TEST_FOLD))[0][:10])
 dataloader_train = torch.utils.data.DataLoader(data_train_sub,
                                                batch_size = BATCH_SIZE,
                                                shuffle=True)
@@ -256,9 +125,9 @@ data_val_test = dlem.dataset_dlem.CombinedDataset(
     dlem.dataset_dlem.TrackDataset(DATA_FOLDER))
 
 data_test = torch.utils.data.Subset(data_val_test,
-                                    np.where(data_val_test.data_folds == TEST_FOLD)[0])
+                                    np.where(data_val_test.data_folds == TEST_FOLD)[0][:10])
 data_val = torch.utils.data.Subset(data_val_test,
-                                   np.where(data_val_test.data_folds == VAL_FOLD)[0])
+                                   np.where(data_val_test.data_folds == VAL_FOLD)[0][:10])
 
 dataloader_test = torch.utils.data.DataLoader(data_test, batch_size = BATCH_SIZE, shuffle=False)
 dataloader_val = torch.utils.data.DataLoader(data_val, batch_size = BATCH_SIZE, shuffle=False)
@@ -312,12 +181,25 @@ checkpoints += [
     ) for celltype in ["H1", "HFF"]
 ]
 
+checkpoints += [
+    L.pytorch.callbacks.ModelCheckpoint(
+    monitor="validation_corr_diff",
+    mode="max",
+    save_top_k=1,
+    save_last=True,
+    filename="best_validation_corr_diff")
+]
+
+wandb.login(key="d4cd96eb50ccb5168c4b750d269715d2cfbd8e44")
+wandb_logger = WandbLogger()
+
 trainer = L.Trainer(accelerator="cpu",
                     devices=1,
                     max_epochs=NUM_EPOCH,
                     log_every_n_steps=100,
                     default_root_dir=SAVE_FOLDER,
-                    callbacks=checkpoints
+                    callbacks=checkpoints,
+                    logger=wandb_logger
 )
 
 trainer.fit(model=model_training,

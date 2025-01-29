@@ -10,33 +10,7 @@ from dlem import util
 import lightning as L
 from IPython import embed
 from tqdm import tqdm
-
-def pairwise_corrcoef(x, y):
-    x = (x - x.mean(dim=1, keepdim=True))/(x.std(dim=1, keepdim=True))
-    y = (y - y.mean(dim=1, keepdim=True))/(y.std(dim=1, keepdim=True))
-    return (x * y).mean(dim=1)
-
-class LitTrainer(L.LightningModule):
-    def __init__(self, model,
-                 learning_rate,
-                 loss,
-                 patch_dim,
-                 start,
-                 stop,
-                 depth,
-                 device):
-        super().__init__()
-        self.save_hyperparameters()
-        self.model = model
-        self.learning_rate = learning_rate
-        self.loss = loss
-        self.patch_dim = patch_dim
-        self.start = start
-        self.stop = stop
-        self.depth = depth
-        self.index_diagonal = util.diag_index_for_mat(self.patch_dim, self.start, self.stop)
-        self.device_model = device
-        self.model = self.model.to(self.device_model)
+from dlem.trainer import LitTrainer
 
 def get_seq_pooler(class_name:str) -> dlem.seq_pooler.SequencePooler:
     """Imports a sequence pooler class from the seq_pooler module.
@@ -123,41 +97,17 @@ model = get_header(args.head_type)(data.patch_dim,
                                    seq_pooler,
                                    channel_per_route=NUMBER_OF_CHANNELS_PER_ROUTE)
 
-model = LitTrainer.load_from_checkpoint(CHECKPOINT,
+model = LitTrainer.load_from_checkpoint(checkpoint_path=CHECKPOINT,
                                         model=model,
                                         learning_rate=0,
-                                        loss=torch.nn.MSELoss,
+                                        loss=torch.nn.MSELoss(),
                                         patch_dim=data.patch_dim,
                                         start=data.start,
                                         stop=data.stop,
                                         depth=15,
-                                        device=dev)
+                                        device=dev,
+                                        metric_file_path=SAVE_FILE)
 
-model_test = model.model
-model_test = model_test.eval()
-model_test = model_test.to(dev)
+trainer = L.Trainer(accelerator="cpu", devices=1)
 
-diag_init = torch.from_numpy(np.ones((BATCH_SIZE, data.patch_dim - data.start),
-                                     dtype=np.float32) * data.patch_dim)
-
-corrs = {cl:[] for cl in data.cell_line_list}
-with torch.no_grad():
-    for seq, diagonals, tracks, cls in tqdm(dataloader):
-        for diagonal, track, cl in zip(diagonals, tracks, cls):
-            cl = cl[0]
-            pred = model_test.contact_map_prediction(track, seq, diag_init[:seq.shape[0]])
-            #corrs[cl].append(torch.diag(torch.corrcoef(torch.concatenate([pred,
-            #                            diagonal[:, data.patch_dim-data.start:]], dim=0))[:pred.shape[0], pred.shape[0]:]).detach().cpu().numpy())
-            corrs[cl].append(pairwise_corrcoef(
-                pred,
-                diagonal[:, data.patch_dim-data.start:]).detach().cpu().numpy())
-
-for cl in corrs:
-    corrs[cl] = np.concatenate(corrs[cl])
-
-test_out = data.datasets[0].region_bed.copy()
-
-for cells in corrs:
-    test_out[cells] = corrs[cells]
-
-test_out.to_csv(SAVE_FILE, sep='\t', index=False, header=True)
+trainer.test(model, dataloader)
