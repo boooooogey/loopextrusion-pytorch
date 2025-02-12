@@ -20,7 +20,11 @@ def weighted_mse(pred:torch.Tensor, target:torch.Tensor) -> torch.Tensor:
     Returns:
         torch.Tensor: weighted mean squared error.
     """
-    return torch.mean((pred - target)**2*torch.exp(target))
+    loss = torch.mean((pred - target)**2*torch.exp(target))
+    if torch.any(torch.isnan(loss)):
+        np.save(".local/debug/weighted_mse_pred.npy", pred.detach().cpu().numpy())
+        np.save(".local/debug/weighted_mse_target.npy", target.detach().cpu().numpy())
+    return loss
 
 def get_seq_pooler(class_name:str) -> dlem.seq_pooler.SequencePooler:
     """Imports a sequence pooler class from the seq_pooler module.
@@ -63,6 +67,7 @@ parser.add_argument('--num-epoch', type=int, default=250, help='Number of epochs
 parser.add_argument('--head-type', type=str, default='ForkedHead',)
 parser.add_argument('--seq-pooler-type', type=str, default='SequencePoolerAttention',)
 parser.add_argument('--resolution', type=int, default=10_000, help='Resolution of the contactmap')
+parser.add_argument('--save-file', type=str, default=None, help='Save the correlations as a file')
 parser.add_argument('--layer-channel-numbers', type=int, nargs='+', default=[4,8,8,8,8],
                     help='Channel numbers for convolutional layers')
 parser.add_argument('--layer-strides', type=int, nargs='+', default=[10,10,10,10],
@@ -98,6 +103,7 @@ DEPTH = args.depth
 TRAIN_CELL_LINE = args.training_cell_line
 USE_SEQ_FEA = args.use_seq_feat
 NUMBER_OF_CHANNELS_PER_ROUTE = args.number_of_channel_per_route
+SAVE_FILE = args.save_file
 
 if not os.path.exists(SAVE_FOLDER):
     os.mkdir(SAVE_FOLDER)
@@ -152,7 +158,8 @@ model_training = LitTrainer(model,
                             data_val_test.start,
                             data_val_test.stop,
                             DEPTH,
-                            dev)
+                            dev,
+                            metric_file_path=SAVE_FILE)
 
 checkpoints = [
     L.pytorch.callbacks.ModelCheckpoint(
@@ -202,7 +209,6 @@ wandb_logger = WandbLogger(name=f"cell_line_{TRAIN_CELL_LINE}_channel_per_route_
 trainer = L.Trainer(accelerator="cpu",
                     devices=1,
                     max_epochs=NUM_EPOCH,
-                    log_every_n_steps=100,
                     default_root_dir=SAVE_FOLDER,
                     callbacks=checkpoints,
                     logger=wandb_logger
@@ -211,3 +217,5 @@ trainer = L.Trainer(accelerator="cpu",
 trainer.fit(model=model_training,
             train_dataloaders=dataloader_train,
             val_dataloaders=dataloader_val)
+
+trainer.test(model_training, dataloader_test)

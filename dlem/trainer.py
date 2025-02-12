@@ -97,6 +97,18 @@ class LitTrainer(L.LightningModule):
 
         return metrics
 
+    def epoch_end_shared(self, metric_dict):
+        for key in metric_dict:
+            if "_loss_" in key:
+                metric_dict[key] = torch.Tensor(
+                    metric_dict[key]
+                    )
+            else:
+                metric_dict[key] = torch.concat(
+                    metric_dict[key]
+                    )
+        return metric_dict
+
     def test_step(self, batch, _):
         """Test step for the model.
         """
@@ -111,15 +123,8 @@ class LitTrainer(L.LightningModule):
         self._all_the_metrics_test = dict()
 
     def on_test_epoch_end(self):
+        self._all_the_metrics_test = self.epoch_end_shared(self._all_the_metrics_test)
         for key in self._all_the_metrics_test:
-            if "_loss_" in key:
-                self._all_the_metrics_test[key] = torch.Tensor(
-                    self._all_the_metrics_test[key]
-                    )
-            else:
-                self._all_the_metrics_test[key] = torch.concat(
-                    self._all_the_metrics_test[key]
-                    )
             self.log(
                 key,
                 self._all_the_metrics_test[key].mean(),
@@ -147,14 +152,11 @@ class LitTrainer(L.LightningModule):
         self._all_the_metrics_val = dict()
 
     def on_validation_epoch_end(self):
+        self._all_the_metrics_val = self.epoch_end_shared(self._all_the_metrics_val)
         for key in self._all_the_metrics_val:
-            if "loss" in key:
-                self._all_the_metrics_val[key] = torch.Tensor(self._all_the_metrics_val[key]).mean()
-            else:
-                self._all_the_metrics_val[key] = torch.concat(self._all_the_metrics_val[key]).mean()
             self.log(
                 key,
-                self._all_the_metrics_val[key],
+                self._all_the_metrics_val[key].mean(),
             )
 
     def configure_optimizers(self):
