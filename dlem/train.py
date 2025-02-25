@@ -108,7 +108,7 @@ SAVE_FILE = args.save_file
 if not os.path.exists(SAVE_FOLDER):
     os.mkdir(SAVE_FOLDER)
 
-dev = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+#dev = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 SeqDataset = dlem.dataset_dlem.SeqFeatureDataset if USE_SEQ_FEA else dlem.dataset_dlem.SeqDataset
 
@@ -158,7 +158,6 @@ model_training = LitTrainer(model,
                             data_val_test.start,
                             data_val_test.stop,
                             DEPTH,
-                            dev,
                             metric_file_path=SAVE_FILE)
 
 checkpoints = [
@@ -206,7 +205,7 @@ wandb.login(key="d4cd96eb50ccb5168c4b750d269715d2cfbd8e44")
 wandb_logger = WandbLogger(name=f"cell_line_{TRAIN_CELL_LINE}_channel_per_route_{NUMBER_OF_CHANNELS_PER_ROUTE}_seq_pooler_{args.seq_pooler_type}_head_{args.head_type}_loss_{LOSS_TYPE}_lr_{LEARNING_RATE}_depth_{DEPTH}",
                            save_dir=SAVE_FOLDER)
 
-trainer = L.Trainer(accelerator="cpu",
+trainer = L.Trainer(accelerator='cuda',
                     devices=1,
                     max_epochs=NUM_EPOCH,
                     default_root_dir=SAVE_FOLDER,

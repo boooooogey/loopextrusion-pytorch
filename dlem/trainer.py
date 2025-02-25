@@ -17,7 +17,6 @@ class LitTrainer(L.LightningModule):
                  start,
                  stop,
                  depth,
-                 device,
                  metric_file_path=None):
         super().__init__()
         self.save_hyperparameters()
@@ -29,18 +28,19 @@ class LitTrainer(L.LightningModule):
         self.stop = stop
         self.depth = depth
         self.index_diagonal = util.diag_index_for_mat(self.patch_dim, self.start, self.stop)
-        self.device_model = device
-        self.model = self.model.to(self.device_model)
         self._all_the_metrics_val = dict()
         self._all_the_metrics_test = dict()
         self.training_loss = []
         self.metric_file_path = metric_file_path
 
+    def transfer_batch_to_device(self, batch, device, dataloader_idx):
+        return batch
+
     def training_step(self, batch, _):
         """Training step for the model.
         """
-        if next(self.model.parameters()).device != self.device_model:
-            self.model = self.model.to(self.device_model)
+        #if next(self.model.parameters()).device != self.device_model:
+        #    self.model = self.model.to(self.device_model)
 
         depth = np.random.choice(range(1, self.depth))
         seq, diagonals, tracks = batch
@@ -66,9 +66,6 @@ class LitTrainer(L.LightningModule):
         Returns:
             dict: dictionary of metrics.
         """
-        if next(self.model.parameters()).device != self.device_model:
-            self.model = self.model.to(self.device_model)
-
         metrics = dict()
         seq, diagonals, tracks, names = batch
 

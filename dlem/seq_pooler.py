@@ -310,3 +310,27 @@ class SequenceFeaturePoolerSimple(SequencePooler):
             torch.Tensor: sequence features.
         """
         return self.layer(seq)
+
+class SequenceFeaturePoolerAttention(SequencePooler):
+    """The module for pooling features from sequence features for HiC contact map prediction. This
+    specific module uses cross attention.
+
+    Args:
+       channel_numbers (List[int]): list of a single value for both input and output channel.
+       stride (List[int]): list of a single value for desired resolution. 
+    """
+    def __init__(self, channel_numbers:List[int], stride:List[int]):
+        super(SequenceFeaturePoolerSimple, self).__init__(channel_numbers, stride)
+        assert len(self.channel_numbers) == len(self.stride)
+        self.layer = AttentionPooling1D(self.stride[0], self.channel_numbers[0], mode="full")
+
+    def forward(self, seq):
+        """forward function.
+
+        Args:
+            seq (torch.Tensor): input sequence.
+
+        Returns:
+            torch.Tensor: sequence features.
+        """
+        return self.layer(seq)
