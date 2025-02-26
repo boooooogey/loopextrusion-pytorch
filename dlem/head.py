@@ -218,12 +218,10 @@ class UnetHead(BaseHead):
         layer_outs = [tmp]
         for n, conv in enumerate(self.convs[:-1]):
             tmp = conv(tmp)
-            print(tmp.shape)
             layer_outs.append(tmp)
         tmp = self.convs[-1](tmp)
         #maybe apply transformer later
         for n, conv in enumerate(self.trans_convs):
-            print(conv(tmp).shape, layer_outs[-(n+1)].shape)
             tmp = conv(tmp) + layer_outs[-(n+1)]
         return self.mixer(tmp)
 

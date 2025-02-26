@@ -1,4 +1,4 @@
-from typing import Tuple, List
+from typing import Tuple, List, Union
 import os
 import glob
 import warnings
@@ -173,7 +173,8 @@ def filter_regions(regions:pd.DataFrame, zero_regions:pd.DataFrame) -> pd.DataFr
     overlap = regions.join(zero_regions)
     return regions[~regions.df["ID"].isin(overlap.df["ID"].unique())].df.drop(columns="ID")
 
-def return_bigwig_region(file:str, chrom:str, start:int, end:int) -> ArrayLike:
+def return_bigwig_region(file:str, chrom:str, start:int,
+                         end:int, res:Union[int, None]) -> ArrayLike:
     """Return the values from the bigwig file for the given region.
 
     Args:
@@ -189,9 +190,12 @@ def return_bigwig_region(file:str, chrom:str, start:int, end:int) -> ArrayLike:
         val = np.array(bw.values(chrom, start, end), dtype=np.float32)
         val = (val - np.nanmean(val)) / np.nanstd(val)
         val[np.isnan(val)] = 0
+        if res is not None:
+            val = val.reshape(res, -1).mean(axis=0)
     return val
 
-def return_bigwig_regions(files:List[str], chrom:str, start:int, end:int) -> ArrayLike:
+def return_bigwig_regions(files:List[str], chrom:str, start:int,
+                          end:int, res:Union[int, None]) -> ArrayLike:
     """Return a matrix of epigenetic values for the given regions. Each row corresponds to a
     different file.
 
@@ -204,7 +208,7 @@ def return_bigwig_regions(files:List[str], chrom:str, start:int, end:int) -> Arr
     Returns:
         ArrayLike: Matrix of epigenetic values. 
     """
-    return np.stack([return_bigwig_region(file, chrom, start, end) for file in files], axis=0)
+    return np.stack([return_bigwig_region(file, chrom, start, end, res) for file in files], axis=0)
 
 class DlemData(Dataset):
     """loading patches from mcool file for given resolution"""
@@ -216,7 +220,8 @@ class DlemData(Dataset):
                  chrom_filter=None,
                  subselection=None,
                  overlap=0,
-                 offset=0):
+                 offset=0,
+                 pool_bigwigs=False):
 
         self.path = path
 
@@ -231,6 +236,8 @@ class DlemData(Dataset):
         self.stop = patch_size
         self.overlap = overlap
         self.offset = offset
+        if pool_bigwigs:
+            self.res = resolution
 
         self.chromosome_lengths = read_chromosome_lengths(os.path.join(path,
                                                                        "cell_types",
@@ -301,7 +308,7 @@ class DlemData(Dataset):
 
     def __getitem__(self, idx):
         region = tuple(self.patches.iloc[idx])
-        seq_features = return_bigwig_regions(self.seq_features_files, *region)
+        seq_features = return_bigwig_regions(self.seq_features_files, *region, self.res)
         if len(self.cell_types) == 1:
             patch = read_contact_from_cooler(os.path.join(self.path,
                                                           "cell_types",
@@ -309,7 +316,7 @@ class DlemData(Dataset):
                                                           "contactmaps.mcool"),
                                             self.resolution,
                                             *region)
-            tracks = return_bigwig_regions(self.bigwig_files[self.cell_types[0]], *region)
+            tracks = return_bigwig_regions(self.bigwig_files[self.cell_types[0]], *region, self.res)
             return seq_features, patch[self.diagonal_ind], tracks
         else:
             patches = [read_contact_from_cooler(os.path.join(self.path,
@@ -319,6 +326,6 @@ class DlemData(Dataset):
                                                self.resolution,
                                                *region)[self.diagonal_ind]
                                                for cell_type in self.cell_types]
-            tracks = [return_bigwig_regions(self.bigwig_files[cell_type], *region)
+            tracks = [return_bigwig_regions(self.bigwig_files[cell_type], *region, self.res)
                       for cell_type in self.cell_types]
             return seq_features, patches, tracks, self.cell_types

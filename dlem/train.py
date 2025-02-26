@@ -89,6 +89,7 @@ parser.add_argument('--training-cell-line', type=str, default="H1",
 parser.add_argument('--use-seq-feat', action='store_true',
                     help='Use sequence features instead of sequence')
 parser.add_argument('--number-of-channel-per-route', type=int, default=3)
+parser.add_argument('--pool-bigwigs', action='store_true', help='Pool bigwigs')
 
 args = parser.parse_args()
 
@@ -116,6 +117,7 @@ USE_SEQ_FEA = args.use_seq_feat
 NUMBER_OF_CHANNELS_PER_ROUTE = args.number_of_channel_per_route
 SAVE_FILE = args.save_file
 HEAD_LAYER_NUM = args.head_layer_num
+POOL_BIGWIGS = args.pool_bigwigs
 
 if not os.path.exists(SAVE_FOLDER):
     os.mkdir(SAVE_FOLDER)
@@ -129,7 +131,9 @@ data_train = dlem.dataset_dlem.DlemData(
     subselection=[TRAIN_CELL_LINE],
     overlap=OVERLAP,
     offset=OFFSETS[0],
-    chrom_filter=[TEST_CHROM, VAL_CHROM]
+    #chrom_filter=[TEST_CHROM, VAL_CHROM]
+    chrom_selection=['chr7'],
+    pool_bigwigs=POOL_BIGWIGS
     )
 
 data_val = dlem.dataset_dlem.DlemData(
@@ -138,7 +142,8 @@ data_val = dlem.dataset_dlem.DlemData(
     PATCH_SIZE,
     overlap=OVERLAP,
     offset=0,
-    chrom_selection=[VAL_CHROM]
+    chrom_selection=[VAL_CHROM],
+    pool_bigwigs=POOL_BIGWIGS
     )
 
 data_test = dlem.dataset_dlem.DlemData(
@@ -147,7 +152,8 @@ data_test = dlem.dataset_dlem.DlemData(
     PATCH_SIZE,
     overlap=OVERLAP,
     offset=0,
-    chrom_filter=[TEST_CHROM]
+    chrom_filter=[TEST_CHROM],
+    pool_bigwigs=POOL_BIGWIGS
     )
 
 trainer_data = LitTrainerData(data_train, data_test, data_val, BATCH_SIZE, OVERLAP, OFFSETS)
@@ -220,15 +226,21 @@ wandb.login(key="d4cd96eb50ccb5168c4b750d269715d2cfbd8e44")
 wandb_logger = WandbLogger(name=f"cell_line_{TRAIN_CELL_LINE}_channel_per_route_{NUMBER_OF_CHANNELS_PER_ROUTE}_seq_pooler_{args.seq_pooler_type}_head_{args.head_type}_loss_{LOSS_TYPE}_lr_{LEARNING_RATE}_depth_{DEPTH}",
                            save_dir=SAVE_FOLDER)
 
+from lightning.pytorch.profilers import PyTorchProfiler 
+profiler = PyTorchProfiler()
+
 trainer = L.Trainer(accelerator='cuda',
                     devices=1,
                     max_epochs=NUM_EPOCH,
                     default_root_dir=SAVE_FOLDER,
                     callbacks=checkpoints,
-                    logger=wandb_logger
+                    logger=wandb_logger,
+                    profiler=profiler
 )
 
 trainer.fit(model=model_training,
             datamodule=trainer_data)
+
+print(profiler.summary())
 
 trainer.test(model_training, datamodule=trainer_data)

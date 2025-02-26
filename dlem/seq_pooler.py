@@ -32,6 +32,14 @@ class SequencePooler(Module, ABC):
             torch.Tensor: features
         """
 
+class SequencePoolerIdentity(SequencePooler):
+    """Identity Sequence pooler. Doesn't do anything"""
+    def __init__(self, channel_numbers:List[int], stride:List[int]):
+        super(SequencePoolerIdentity, self).__init__(channel_numbers, stride)
+
+    def forward(self, x:torch.Tensor) -> torch.Tensor:
+        return x
+
 class SequencePoolerInterleaved(SequencePooler):
     """The module for pooling features from sequence for HiC contact map prediction. This specific
     module uses interleaved convolution to pool the sequence features.
@@ -349,7 +357,7 @@ class SequenceFeaturePoolerAttention(SequencePooler):
        stride (List[int]): list of a single value for desired resolution. 
     """
     def __init__(self, channel_numbers:List[int], stride:List[int]):
-        super(SequenceFeaturePoolerSimple, self).__init__(channel_numbers, stride)
+        super(SequenceFeaturePoolerAttention, self).__init__(channel_numbers, stride)
         assert len(self.channel_numbers) == len(self.stride)
         self.layer = AttentionPooling1D(self.stride[0], self.channel_numbers[0], mode="full")
 
