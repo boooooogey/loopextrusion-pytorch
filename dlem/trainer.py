@@ -52,6 +52,7 @@ class LitTrainer(L.LightningModule):
 
     def on_train_epoch_start(self):
         self.training_loss = []
+        self.trainer.datamodule.on_train_epoch_start(self.current_epoch)
 
     def on_train_epoch_end(self):
         self.log("train_loss", np.mean(self.training_loss))

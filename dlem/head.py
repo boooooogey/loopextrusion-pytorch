@@ -1,6 +1,6 @@
 """Head module blue print for the DLEM sequence models. This model produces """
 from abc import ABC, abstractmethod
-from typing import Tuple
+from typing import Tuple, Union
 import numpy as np
 from torch import nn
 from torch.nn import (Module,
@@ -145,6 +145,106 @@ class BaseHead(nn.Module, ABC):
         right = left_right[:, 1, :]
         return (left.detach().cpu().numpy(),
                 right.detach().cpu().numpy())
+
+class UnetHead(BaseHead):
+    """Predict contact map from Encode signals.
+    """
+    def __init__(self, size:int,
+                       track_dim:int,
+                       seq_dim:int,
+                       start_diagonal:int,
+                       stop_diagonal:int,
+                       dlem_func:callable,
+                       tail:Module,
+                       network_width:Union[int,None]=None,
+                       channel_per_route:int=3,
+                       layer_num:int = 4):
+
+        super(UnetHead, self).__init__(size,
+                                         track_dim,
+                                         seq_dim,
+                                         start_diagonal,
+                                         stop_diagonal,
+                                         dlem_func,
+                                         tail)
+
+        def conv_unit_maker(in_dim, out_dim):
+            return Sequential(Conv1d(in_channels=in_dim, out_channels=out_dim, kernel_size=3),
+                              BatchNorm1d(out_dim),
+                              ReLU())
+
+        def trans_conv_unit_maker(in_dim, out_dim):
+            return Sequential(ConvTranspose1d(in_channels=in_dim,
+                                              out_channels=out_dim,
+                                              kernel_size=3),
+                              BatchNorm1d(out_dim),
+                              ReLU())
+
+        self.layer_num = layer_num
+        self.channel_per_route = channel_per_route
+        if network_width is None:
+            network_width = layer_num * channel_per_route
+
+        self.firstconv  = Sequential(Conv1d(in_channels=self.track_dim + self.seq_dim,
+                                            out_channels=network_width, kernel_size=3,
+                                            padding=1),
+                              BatchNorm1d(network_width),
+                              ReLU())
+        self.convs  = [conv_unit_maker(network_width,
+                                       network_width) for i in range(layer_num)]
+
+        self.convs = ModuleList(self.convs)
+        self.trans_convs = ModuleList([
+            trans_conv_unit_maker(network_width,
+                                  network_width) for i in range(layer_num)
+            ]
+        )
+        self.mixer = Sequential(Conv1d(in_channels=network_width,
+                                       out_channels=2,
+                                       kernel_size=1),
+                                Sigmoid()
+                     )
+
+    def converter(self, tracks:torch.Tensor, seq:torch.Tensor) -> torch.Tensor:
+        """Converts the input epigenetic signals into DLEM parameters.
+
+        Args:
+            signal (ArrayLike): epigenetic tracks
+
+        Returns:
+            ArrayLike: parameters, p_l, p_r
+        """
+        tmp = self.firstconv(self.tail(torch.cat([tracks, seq], axis=-2)))
+        layer_outs = [tmp]
+        for n, conv in enumerate(self.convs[:-1]):
+            tmp = conv(tmp)
+            print(tmp.shape)
+            layer_outs.append(tmp)
+        tmp = self.convs[-1](tmp)
+        #maybe apply transformer later
+        for n, conv in enumerate(self.trans_convs):
+            print(conv(tmp).shape, layer_outs[-(n+1)].shape)
+            tmp = conv(tmp) + layer_outs[-(n+1)]
+        return self.mixer(tmp)
+
+    def forward(self, diagonals:torch.Tensor,
+                      tracks:torch.Tensor,
+                      seq:torch.Tensor,
+                      depth:int) -> torch.Tensor:
+        """forward operation for the network.
+
+        Args:
+            curr_diag (ArrayLike): current diagonal. current state.
+            diag_i (int): diagonal index for the current state.
+            transform (bool, optional): Should the output converted into log space and centered.
+            Defaults to True.
+
+        Returns:
+            ArrayLike: prediction for the next state.
+        """
+        dev = self.mixer[0].weight.device
+        left_right = self.converter(tracks.to(dev), seq.to(dev))
+        return self.dlem_output(diagonals, left_right[:, 0, :], left_right[:, 1, :], depth)
 
 class ForkedHead(BaseHead):
     """Predict contact map from Encode signals.

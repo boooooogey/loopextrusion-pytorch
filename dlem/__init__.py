@@ -10,6 +10,7 @@ from . import head
 from . import dataset_dlem
 from . import seq_pooler
 from . import trainer
+from . import trainer_data
 
 
 all_functions = {name: obj for name, obj in inspect.getmembers(util) if inspect.isfunction(obj)}
@@ -27,3 +28,4 @@ __all__.append('head')
 __all__.append('dataset_dlem')
 __all__.append('seq_pooler')
 __all__.append('trainer')
+__all__.append('trainer_data')

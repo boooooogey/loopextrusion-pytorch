@@ -1,361 +1,324 @@
-"""
-The dataset classes used in training DLEM models.
-"""
+from typing import Tuple, List
 import os
-from typing import Union, List, Tuple
-from abc import ABC, abstractmethod
-import pandas as pd
+import glob
+import warnings
 import numpy as np
-import torch
+import pandas as pd
+import pyranges as pr
+from torch.utils.data import Dataset
+import cooler
+from cooltools.lib.numutils import adaptive_coarsegrain, interp_nan
 from numpy.typing import ArrayLike
 import pyBigWig
-from dlem import util
 
-def _standardize(x:ArrayLike, stats:Union[Tuple[float, float],None]=None) -> ArrayLike:
-    if stats is None:
-        return (x - x.mean()) / x.std()
-    else:
-        return (x - stats[0]) / stats[1]
+def flip_diag_row(mat:ArrayLike) -> ArrayLike:
+    """Swap row and diagonal elements of a given matrix.
 
-class DLEMDataset(torch.utils.data.Dataset, ABC):
-    """This class is the blueprint for reading contactmaps, one hot embedded sequences and tracks.
+    Args:
+        mat (ArrayLike): given matrix.
+
+    Returns:
+        ArrayLike: row diagonal swapped matrix. 
     """
-    def __init__(self, path:str):
-        """
-        Args:
-            path (str): path to the directory where the contactmaps, sequences and tracks are kept.
-        """
+    n = mat.shape[0]
+    ii = np.arange(n)
+    iy = ii.reshape(1,-1) * np.ones(n).reshape(-1,1)
+    ix = (ii[::-1].reshape(-1,1) - ii[::-1].reshape(1,-1)) % n
+    return mat[ix.astype(int), iy.astype(int)]
+
+def diagonal_normalize(mat:ArrayLike) -> ArrayLike:
+    """Center each diagonal mean at 0.
+
+    Args:
+        mat (ArrayLike): input patch.
+
+    Returns:
+        ArrayLike: matrix with 0 centered diagonals.
+    """
+    mat = flip_diag_row(mat)
+    centers = np.mean(mat, where=np.triu(np.ones_like(mat, dtype=bool)), axis=1)
+    mat = flip_diag_row(mat - centers.reshape(-1, 1))
+    return np.triu(mat) + np.triu(mat, 1).T
+
+def return_diagonal_ordered_triu_indices(n:int) -> Tuple[ArrayLike, ArrayLike]:
+    """Return the indices of the upper triangular part of the matrix in the order of diagonals.
+
+    Args:
+        n (int): size of the matrix. The matrix is assumed to be square.
+
+    Returns:
+        Tuple[ArrayLike, ArrayLike]: indices of the upper triangular part of the matrix in the order
+        of diagonals.
+    """
+    first = np.concatenate([np.arange(n-i) for i in range(n)])
+    second = np.concatenate([np.arange(i, n) for i in range(n)])
+    return first, second
+
+def read_contact_from_cooler(file:str,
+                             res:int,
+                             chrom:str,
+                             start:int,
+                             end:int) -> ArrayLike:
+    """Read contact map from cooler files for the region provided.
+
+    Args:
+        file (str): cooler path.
+        res (int): resolution of the data.
+        chrom (str): chromosome for the region.
+        start (int): start genomic locus.
+        end (int): end genomic locus.
+
+    Returns:
+        ArrayLike: contact map for the patch.
+    """
+    region = (chrom, start, end)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        clr =  cooler.Cooler(file + f'::resolutions/{res}')
+        patch = adaptive_coarsegrain(clr.matrix(balance=True).fetch(region),
+                                    clr.matrix(balance=False).fetch(region),
+                                    cutoff=3, max_levels=8)
+        patch = interp_nan(patch)
+        patch = diagonal_normalize(np.log(patch))
+    return patch.astype(np.float32)
+
+def read_chromosome_lengths(file:str, res:int) -> dict:
+    """Return chromosome lengths from the cooler file.
+
+    Args:
+        file (str): mcool file path.
+        res (int): resolution of the contact map.
+
+    Returns:
+        dict: Dictionary of chromosome lengths.
+    """
+    clr = cooler.Cooler(file+f'::resolutions/{res}')
+    return dict(clr.chromsizes)
+
+def return_patch_regions(chrom_sizes:dict,
+                         patch_size:int,
+                         resolution:int,
+                         overlap:int,
+                         offset:int) -> pd.DataFrame:
+    """Return the regions for given patch size, overlap and offset.
+
+    Args:
+        chrom_sizes (dict): Chromosome sizes.
+        patch_size (int): The size of the patch.
+        resolution (int): resolution of the contact map from mcool file.
+        overlap (int): how much overlap between patches.
+        offset (int): offset the patches. To generate different views of the data.
+
+    Returns:
+        pd.DataFrame: The regions for the patches as (chrom, start, end).
+    """
+
+    starts = []
+    ends = []
+    chroms = []
+    overlap = overlap * resolution
+    patch_size = patch_size * resolution
+    offset = offset * resolution
+    for chrom in chrom_sizes:
+        binned_chrom_size  = chrom_sizes[chrom] // 2_000  * 2_000
+        start = np.clip(np.array(range(offset,
+                                       binned_chrom_size - patch_size,
+                                       patch_size - overlap)), 0, binned_chrom_size)
+        end = np.clip(np.array(range(offset + patch_size,
+                                     binned_chrom_size,
+                                     patch_size - overlap)), 0, binned_chrom_size)
+        starts.append(start)
+        ends.append(end)
+        chroms += [chrom] * len(start)
+
+    starts = np.concatenate(starts)
+    ends = np.concatenate(ends)
+    return pd.DataFrame({'chrom': chroms, 'start': starts, 'end': ends})
+
+def convert_diagonals_to_mat(diagonals:ArrayLike, n:int) -> ArrayLike:
+    """Converts diagonals in vector from to matrix form.
+
+    Args:
+        diagonals (ArrayLike): Vectorized diagonals. [d_1... d_n].
+        n (int): size of the matrix.
+
+    Returns:
+        ArrayLike: Matrix form of the diagonals.
+    """
+    mat = np.zeros((n, n), dtype=np.float32)
+    first, second = return_diagonal_ordered_triu_indices(n)
+    mat[first, second] = diagonals
+    mat[second, first] = diagonals
+    return mat
+
+def filter_regions(regions:pd.DataFrame, zero_regions:pd.DataFrame) -> pd.DataFrame:
+    """Filter out the regions overlapping with the zero regions.
+
+    Args:
+        regions (pd.DataFrame): patch regions to be filtered.
+        zero_regions (pd.DataFrame): Regions of zero coverage from the mcool file.
+
+    Returns:
+        pd.DataFrame: Filtered regions.
+    """
+    regions = regions.copy()
+    regions.columns = ['Chromosome', 'Start', 'End']
+    regions["ID"] = regions.index
+    regions = pr.PyRanges(regions)
+
+    zero_regions = zero_regions.copy()
+    zero_regions.columns = ['Chromosome', 'Start', 'End']
+    zero_regions = pr.PyRanges(zero_regions)
+
+    overlap = regions.join(zero_regions)
+    return regions[~regions.df["ID"].isin(overlap.df["ID"].unique())].df.drop(columns="ID")
+
+def return_bigwig_region(file:str, chrom:str, start:int, end:int) -> ArrayLike:
+    """Return the values from the bigwig file for the given region.
+
+    Args:
+        file (str): bigwig file path.
+        chrom (str): chromosome.
+        start (int): start genomic locus.
+        end (int): end genomic locus.
+
+    Returns:
+        ArrayLike: epigenetic values.
+    """
+    with pyBigWig.open(file) as bw:
+        val = np.array(bw.values(chrom, start, end), dtype=np.float32)
+        val = (val - np.nanmean(val)) / np.nanstd(val)
+        val[np.isnan(val)] = 0
+    return val
+
+def return_bigwig_regions(files:List[str], chrom:str, start:int, end:int) -> ArrayLike:
+    """Return a matrix of epigenetic values for the given regions. Each row corresponds to a
+    different file.
+
+    Args:
+        files (List[str]): List of bigwig files.
+        chrom (str): chromosome.
+        start (int): start genomic locus.
+        end (int): end genomic locus.
+
+    Returns:
+        ArrayLike: Matrix of epigenetic values. 
+    """
+    return np.stack([return_bigwig_region(file, chrom, start, end) for file in files], axis=0)
+
+class DlemData(Dataset):
+    """loading patches from mcool file for given resolution"""
+    def __init__(self,
+                 path,
+                 resolution,
+                 patch_size,
+                 chrom_selection=None,
+                 chrom_filter=None,
+                 subselection=None,
+                 overlap=0,
+                 offset=0):
+
         self.path = path
-        self.args = util.read_json(os.path.join(path, 'meta.json'))
-        self.region_bed = pd.read_csv(os.path.join(path, "regions.bed"),
-                                 sep="\t",
-                                 header=None)
-        self.region_bed.columns = ["chr", "start", "end", "fold", "fold_index"]
 
-        self.folds = self.region_bed.iloc[:,3].to_numpy()
-        self.fold_labels = np.unique(self.region_bed.iloc[:,3].to_numpy()) 
-        self.fold_nums = dict(self.region_bed.value_counts("fold"))
-        self.cell_lines = self.args["CELL_LINES"]
-
-    @abstractmethod
-    def __getitem__(self, index:int) -> ArrayLike:
-        """Reading samples from  the dataset depending on the format"""
-
-    def __len__(self)->int:
-        return int(self.args["SAMPLE_NUM"])
-
-    @property
-    def cell_line_list(self) -> List[str]:
-        """return the cell lines present in the dataset"""
-        return self.cell_lines
-
-    @property
-    def data_folds(self) -> ArrayLike:
-        """return folds"""
-        return self.folds
-
-    @property
-    def genomic_region_length(self) -> ArrayLike:
-        """return patch dimensions"""
-        return int(self.args['PATCH_EDGE_SIZE'])
-
-class SeqDataset(DLEMDataset):
-    """Reads the squences from memmap. The sequences are stored as one-hot encoded.
-    """
-    def __init__(self, path:str, shift:int=0):
-        """
-        Args:
-            path (str): path to the dataset where sequences are stored in memmap format. The dataset
-            is expected to be separated into folds.
-            shift (int): shift the sequence by a random number between 0 and shift.
-        """
-        super(SeqDataset, self).__init__(path)
-
-        self.seqs = dict()
-        for fold in self.fold_labels:
-            self.seqs[fold] = np.memmap(
-                os.path.join(path, f'sequences.{fold}.dat'),
-                dtype='int32',
-                mode = 'r',
-                shape=(self.fold_nums[fold],
-                    self.args['PATCH_EDGE_SIZE'] + 2 * self.args["SEQUENCE_OFFSET"])
-            )
-
-        if shift >= 0 and shift > self.args['SEQUENCE_OFFSET']:
-            raise ValueError("Shift must be between 0 and sequence offset")
-        self.shift = shift
-
-
-    def __getitem__(self, index:int) -> ArrayLike:
-        fold = self.region_bed.iloc[index]["fold"]
-        fold_index = self.region_bed.iloc[index]["fold_index"]
-        offset = self.args["SEQUENCE_OFFSET"]
-        shift = np.random.choice([-1,1]) * int(np.random.rand() * self.shift)
-        row_index = np.array(self.seqs[fold][fold_index])[(offset+shift):(-offset+shift)]
-        column_index = np.arange(len(row_index))
-        mask = row_index != 4
-        one_hot_emb = np.zeros((4, len(row_index)), dtype=np.float32)
-        one_hot_emb[row_index[mask], column_index[mask]] = 1
-        one_hot_emb = torch.from_numpy(one_hot_emb)
-        return one_hot_emb
-
-class SeqFeatureDataset(DLEMDataset):
-    """Reads sequence features from bigwig files."""
-    def __init__(self, path:str, shift:int=0):
-        super().__init__(path)
-        self.shift = shift
-        self.seq_fea_files = os.listdir(os.path.join(path,
-                                                     "seq_features"))
-
-        self.tracks = []
-        self.track_stats = []
-
-        for track in self.seq_fea_files:
-            self.tracks.append(pyBigWig.open(os.path.join(self.path,
-                                                          "seq_features",
-                                                          track), 'r'))
-            self.track_stats.append(util.get_stats_from_bw_chrom_separated(self.tracks[-1]))
-
-    def __getitem__(self, index:int) -> ArrayLike:
-        region = self.region_bed.iloc[index]
-        start = region["start"]
-        end = region["end"]
-        tracks = np.empty((len(self.tracks), end - start), dtype=np.float32)
-        for i, (track, stats) in enumerate(zip(self.tracks,
-                                                self.track_stats)):
-            tmp = np.array(track.values(region["chr"], start, end))
-            tmp = np.log1p(_standardize(tmp, stats[region["chr"]]))
-            tmp[np.isnan(tmp)] = 0
-            tracks[i] = tmp
-        return tracks
-
-class ContactmapDataset(DLEMDataset):
-    """Reads the squences from memmap. The sequences are stored as one-hot encoded.
-    """
-    def __init__(self, path:str, resolution:int, select_cell_lines:Union[List[str],None]=None):
-        """
-        Args:
-            path (str): path to the dataset where contactmaps are stored in memmap format.
-            The dataset is expected to be separated into folds. The contact maps are stored in a
-            vectorized form. The elements in the same diagonals are stored contiguously.
-            resolution (int): resolution of the contact maps. Hopefully there are more than one
-            option.
-            select_cell_lines (Union[List[str],None]): select the cell lines to be used in the
-            dataset. default is None.
-        """
-        super(ContactmapDataset, self).__init__(path)
-        self.resolution = resolution
-
-        self.sample_size = dict(zip(self.args["RES"],
-                                    self.args["DIAGONALIZED_SIZE"]))[self.resolution]
-        self.start_diag = self.args["START_DIAG"] // self.resolution
-        self.stop_diag = self.args["STOP_DIAG"] // self.resolution
-        self.contact_map_edge_length = self.args["PATCH_EDGE_SIZE"] // self.resolution
-
-        if select_cell_lines is not None:
-            check_e = all(cell_line in self.args["CELL_LINES"] for cell_line in select_cell_lines)
-            check_z = len(select_cell_lines) != 0
-            assert check_e, "Cell lines not found in the dataset"
-            assert check_z, "Select at least one cell line"
-            self.cell_lines = select_cell_lines
-        else:
-            self.cell_lines = self.args["CELL_LINES"]
-
-        self.contactmaps = dict()
-        for cell_line in self.cell_lines:
-            for fold in self.fold_labels:
-                self.contactmaps[f"{cell_line}_{fold}"] = np.memmap(
-                    os.path.join(path,
-                                 cell_line,
-                                 f"res_{self.resolution}",
-                                 f'contactmaps.{fold}.dat'),
-                    dtype='float32',
-                    mode = 'r',
-                    shape=(self.fold_nums[fold],
-                        self.sample_size)
-                )
-
-    def __getitem__(self, index:int) -> ArrayLike:
-        fold = self.region_bed.iloc[index]["fold"]
-        fold_index = self.region_bed.iloc[index]["fold_index"]
-        if len(self.cell_lines) == 1:
-            cell_line = self.cell_lines[0]
-            contactmap = np.array(self.contactmaps[f"{cell_line}_{fold}"][fold_index])
-            return contactmap
-        else:
-            contactmaps =[]
-            for cell_line in self.cell_lines:
-                contactmaps.append(np.array(self.contactmaps[f"{cell_line}_{fold}"][fold_index]))
-            return contactmaps
-
-    @property
-    def size(self) -> int:
-        """return patch length in vectorized form."""
-        return int(self.sample_size)
-
-    @property
-    def start(self) -> int:
-        """At what diagonal to start"""
-        return self.start_diag
-
-    @property
-    def stop(self) -> int:
-        """At what diagonal to stop"""
-        return self.stop_diag
-
-    @property
-    def patch_edge(self) -> int:
-        """Edge length of the contactmap at the given resolution."""
-        return self.contact_map_edge_length
-
-class TrackDataset(DLEMDataset):
-    """Reads the squences from memmap. The sequences are stored as one-hot encoded.
-    """
-    def __init__(self, path:str,
-                       subselection:Union[ArrayLike, None]=None,
-                       select_cell_lines:Union[List[str],None]=None):
-        """
-        Args:
-            path (str): path to the dataset where tracks are stored in memmap format.
-            The dataset is expected to be separated into folds. The tracks are stored in a
-            vectorized form.
-            track_name (str): name of the track to be read.
-        """
-        super(TrackDataset, self).__init__(path)
-        if select_cell_lines is not None:
-            check_e = all(cell_line in self.args["CELL_LINES"] for cell_line in select_cell_lines)
-            check_z = len(select_cell_lines) != 0
-            assert check_e, "Cell lines not found in the dataset"
-            assert check_z, "Select at least one cell line"
-            self.cell_lines = select_cell_lines
-        else:
-            self.cell_lines = self.args["CELL_LINES"]
-
-        self.track_files = dict()
-        for cell_line in self.cell_lines:
-            self.track_files[cell_line] = os.listdir(os.path.join(path,
-                                                                  cell_line,
-                                                                  "tracks"))
+        self.cell_types = sorted(os.listdir(os.path.join(path, "cell_types")))
         if subselection is not None:
-            for cell_line in self.cell_lines:
-                self.track_files[cell_line] = self.track_files[subselection]
+            self.cell_types = subselection
+        self.avoid_regions_file = os.path.join(path, "avoid.tsv")
 
+        self.resolution = resolution
+        self.patch_size = patch_size
+        self.start = 0
+        self.stop = patch_size
+        self.overlap = overlap
+        self.offset = offset
 
-        self.tracks = dict()
-        self.track_stats = dict()
+        self.chromosome_lengths = read_chromosome_lengths(os.path.join(path,
+                                                                       "cell_types",
+                                                                       self.cell_types[0],
+                                                                       "contactmaps.mcool"),
+                                                                       resolution)
 
-        for cell_line in self.cell_lines:
-            tracks = []
-            stats = []
-            for track in self.track_files[cell_line]:
-                tracks.append(pyBigWig.open(os.path.join(self.path,
-                                                         cell_line,
-                                                         "tracks",
-                                                         track), 'r'))
-                stats.append(util.get_stats_from_bw_chrom_separated(tracks[-1]))
-            self.tracks[cell_line] = tracks
-            self.track_stats[cell_line] = stats
+        if chrom_selection is not None:
+            self.chromosome_lengths = {chrom: self.chromosome_lengths[chrom]
+                                       for chrom in chrom_selection}
+        if chrom_filter is not None:
+            self.chromosome_lengths = {chrom: size
+                                       for chrom, size in self.chromosome_lengths.items()
+                                       if chrom not in chrom_filter}
 
-    def __getitem__(self, index:int) -> ArrayLike:
-        region = self.region_bed.iloc[index]
-        start = region["start"]
-        end = region["end"]
-        if len(self.cell_lines) == 1:
-            cell_line = self.cell_lines[0]
-            tracks = np.empty((len(self.tracks[cell_line]), end - start), dtype=np.float32)
-            for i, (track, stats) in enumerate(zip(self.tracks[cell_line],
-                                                   self.track_stats[cell_line])):
-                tmp = np.array(track.values(region["chr"], start, end))
-                tmp = np.log1p(_standardize(tmp, stats[region["chr"]]))
-                tracks[i] = tmp
-            return tracks
-        else:
-            tracks_all = []
-            for cell_line in self.cell_lines:
-                tracks = np.empty((len(self.tracks[cell_line]), end - start), dtype=np.float32)
-                for i, (track, stats) in enumerate(zip(self.tracks[cell_line],
-                                                       self.track_stats[cell_line])):
-                    tmp = np.array(track.values(region["chr"], start, end))
-                    tmp = np.log1p(_standardize(tmp, stats[region["chr"]]))
-                    tracks[i] = tmp
-                tracks_all.append(tracks)
-            return tracks_all
+        self.avoid_regions = pd.read_csv(self.avoid_regions_file, sep='\t')
 
-    @property
-    def track_name(self) -> str:
-        """return track name"""
-        return self.track_files
+        self.patches = return_patch_regions(self.chromosome_lengths,
+                                            patch_size,
+                                            resolution,
+                                            overlap,
+                                            offset)
 
-class CombinedDataset(torch.utils.data.Dataset):
-    """Reads the squences from memmap. The sequences are stored as one-hot encoded.
-    """
-    def __init__(self, seq_dataset:torch.utils.data.Dataset,
-                       contactmap_dataset:torch.utils.data.Dataset,
-                       track_dataset:Union[torch.utils.data.Dataset, None]=None):
-        """
+        self.patches = filter_regions(self.patches, self.avoid_regions)
+        self.diagonal_ind = return_diagonal_ordered_triu_indices(patch_size)
+
+        self.bigwig_files = dict()
+
+        for cell_type in self.cell_types:
+            self.bigwig_files[cell_type] = sorted([file
+                                        for ext in ['*.bigwig', '*.bigWig', '*.bw']
+                                        for file in glob.glob(os.path.join(path,
+                                                                           "cell_types",
+                                                                           cell_type,
+                                                                           "tracks",
+                                                                           ext))])
+        # Ensure all lists in the dictionary have the same length
+        track_lengths = [len(files) for files in self.bigwig_files.values()]
+        if not all(track_lengths[0] == np.array(track_lengths)):
+            raise ValueError("All cell types must have the same number of tracks!")
+        self.track_dim = track_lengths[0]
+
+        self.seq_features_files = sorted([file
+                                        for ext in ['*.bigwig', '*.bigWig', '*.bw']
+                                        for file in glob.glob(os.path.join(path,
+                                                                           'seq_features',
+                                                                           ext))])
+
+    def rearrange_patches(self, overlap:int, offset:int):
+        """Given new overlap and offset, rearrange the patches.
+
         Args:
-            path (str): path to the dataset where contactmaps are stored in memmap format.
-            The dataset is expected to be separated into folds. The contact maps are stored in a
-            vectorized form. The elements in the same diagonals are stored contiguously.
-            resolution (int): resolution of the contact maps. Hopefully there are more than one
-            option.
+            overlap (int): overlap between patches.
+            offset (int): offset between patches.
         """
-        if track_dataset is not None:
-            self.datasets = [seq_dataset, contactmap_dataset, track_dataset]
+        self.overlap = overlap
+        self.offset = offset
+        self.patches = return_patch_regions(self.chromosome_lengths,
+                                            self.patch_size,
+                                            self.resolution,
+                                            overlap,
+                                            offset)
+
+        self.patches = filter_regions(self.patches, self.avoid_regions)
+
+    def __len__(self):
+        return len(self.patches)
+
+    def __getitem__(self, idx):
+        region = tuple(self.patches.iloc[idx])
+        seq_features = return_bigwig_regions(self.seq_features_files, *region)
+        if len(self.cell_types) == 1:
+            patch = read_contact_from_cooler(os.path.join(self.path,
+                                                          "cell_types",
+                                                          self.cell_types[0],
+                                                          "contactmaps.mcool"),
+                                            self.resolution,
+                                            *region)
+            tracks = return_bigwig_regions(self.bigwig_files[self.cell_types[0]], *region)
+            return seq_features, patch[self.diagonal_ind], tracks
         else:
-            self.datasets = [seq_dataset, contactmap_dataset]
-        if not all([dataset.path == self.datasets[0].path for dataset in self.datasets[1:]]):
-            raise ValueError("All datasets must have the same path")
-        if len(self.datasets) == 3:
-            check_order = [cl1 == cl2 for cl1, cl2 in zip(self.datasets[1].cell_lines,
-                                                        self.datasets[2].cell_lines)]
-            if not all(check_order):
-                raise ValueError("Cell lines must be in the same order "
-                                "between contactmap and track datasets")
-        self.args = self.datasets[0].args
-
-    def __getitem__(self, index:int) -> ArrayLike:
-        region = self.datasets[0].region_bed.iloc[index]
-        if not all(region.equals(dataset.region_bed.iloc[index]) for dataset in self.datasets[1:]):
-            raise ValueError("All datasets must have the same regions!")
-        if len(self.datasets[1].cell_lines) == 1:
-            return tuple(dataset[index] for dataset in self.datasets)
-        else:
-            names_tuple = tuple([self.datasets[1].cell_lines])
-            return tuple(dataset[index] for dataset in self.datasets) + names_tuple
-
-    def __len__(self)->int:
-        return len(self.datasets[0])
-
-    @property
-    def cell_line_list(self) -> List[str]:
-        """return the cell lines present in the dataset"""
-        return self.datasets[1].cell_line_list
-
-    @property
-    def data_folds(self) -> ArrayLike:
-        """return folds"""
-        return self.datasets[0].data_folds
-
-    @property
-    def patch_dim(self) -> int:
-        """Patch dimension"""
-        return self.datasets[1].patch_edge
-
-    @property
-    def start(self) -> ArrayLike:
-        """At what diagonal to start"""
-        return self.datasets[1].start
-
-    @property
-    def stop(self) -> ArrayLike:
-        """At what diagonal to stop"""
-        return self.datasets[1].stop
-
-    @property
-    def track_dim(self) -> int:
-        """Number of tracks"""
-        if len(self.datasets) < 3:
-            return 0
-        cell_line = self.datasets[2].cell_lines[0]
-        return len(self.datasets[2].track_name[cell_line])
+            patches = [read_contact_from_cooler(os.path.join(self.path,
+                                                             "cell_types",
+                                                             cell_type,
+                                                             "contactmaps.mcool"),
+                                               self.resolution,
+                                               *region)[self.diagonal_ind]
+                                               for cell_type in self.cell_types]
+            tracks = [return_bigwig_regions(self.bigwig_files[cell_type], *region)
+                      for cell_type in self.cell_types]
+            return seq_features, patches, tracks, self.cell_types

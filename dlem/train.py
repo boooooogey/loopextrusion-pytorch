@@ -9,6 +9,7 @@ from lightning.pytorch.loggers import WandbLogger
 import wandb
 import dlem
 from dlem.trainer import LitTrainer
+from dlem.trainer_data import LitTrainerData
 
 def weighted_mse(pred:torch.Tensor, target:torch.Tensor) -> torch.Tensor:
     """Calculates the weighted mean squared error. The weights are the exponential of the target.
@@ -59,9 +60,16 @@ parser = argparse.ArgumentParser(description='Training script')
 parser.add_argument('--data-folder', type=str, required=True, help='Data folder')
 parser.add_argument('--save-folder', type=str, required=True, help='Save folder')
 parser.add_argument('--batch-size', type=int, default=5, help='Batch size')
-parser.add_argument('--test-fold', type=str, default='fold4', help='Test fold')
-parser.add_argument('--val-fold', type=str, default='fold5', help='Validation fold')
+parser.add_argument('--offset-contactmaps', type=int, nargs='+', required=True,
+                    help='Offsets for the contactmaps')
+parser.add_argument('--overlap-contactmaps', type=int, required=True,
+                    help='Overlap for the contactmaps')
+parser.add_argument('--patch-size', type=int, required=True,
+                    help='Patchsize for the contactmaps')
+parser.add_argument('--test-chrom', type=str, default='chr4', help='Test fold')
+parser.add_argument('--val-chrom', type=str, default='chr5', help='Validation fold')
 parser.add_argument('--learning-rate', type=float, default=0.0001, help='Learning rate')
+parser.add_argument('--head-layer-num', type=int, default=4, help='Head layer number')
 parser.add_argument('--patience', type=int, default=25, help='Patience')
 parser.add_argument('--num-epoch', type=int, default=250, help='Number of epochs')
 parser.add_argument('--head-type', type=str, default='ForkedHead',)
@@ -87,8 +95,11 @@ args = parser.parse_args()
 BATCH_SIZE = args.batch_size
 #'../../../loopextrusion_data_creation/.data/training_data_res_1000_patch_size_500'
 DATA_FOLDER = args.data_folder
-TEST_FOLD = args.test_fold
-VAL_FOLD = args.val_fold
+TEST_CHROM = args.test_chrom
+VAL_CHROM = args.val_chrom
+OVERLAP = args.overlap_contactmaps
+OFFSETS = args.offset_contactmaps
+PATCH_SIZE = args.patch_size
 LEARNING_RATE = args.learning_rate
 PATIENCE = args.patience
 NUM_EPOCH = args.num_epoch
@@ -104,59 +115,63 @@ TRAIN_CELL_LINE = args.training_cell_line
 USE_SEQ_FEA = args.use_seq_feat
 NUMBER_OF_CHANNELS_PER_ROUTE = args.number_of_channel_per_route
 SAVE_FILE = args.save_file
+HEAD_LAYER_NUM = args.head_layer_num
 
 if not os.path.exists(SAVE_FOLDER):
     os.mkdir(SAVE_FOLDER)
 
 #dev = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
-SeqDataset = dlem.dataset_dlem.SeqFeatureDataset if USE_SEQ_FEA else dlem.dataset_dlem.SeqDataset
+data_train = dlem.dataset_dlem.DlemData(
+    DATA_FOLDER,
+    RES,
+    PATCH_SIZE,
+    subselection=[TRAIN_CELL_LINE],
+    overlap=OVERLAP,
+    offset=OFFSETS[0],
+    chrom_filter=[TEST_CHROM, VAL_CHROM]
+    )
 
-data_train = dlem.dataset_dlem.CombinedDataset(
-    SeqDataset(DATA_FOLDER),
-    dlem.dataset_dlem.ContactmapDataset(DATA_FOLDER, RES, select_cell_lines=[TRAIN_CELL_LINE]),
-    dlem.dataset_dlem.TrackDataset(DATA_FOLDER, select_cell_lines=[TRAIN_CELL_LINE]))
+data_val = dlem.dataset_dlem.DlemData(
+    DATA_FOLDER,
+    RES,
+    PATCH_SIZE,
+    overlap=OVERLAP,
+    offset=0,
+    chrom_selection=[VAL_CHROM]
+    )
 
-data_train_sub = torch.utils.data.Subset(data_train,
-                                     np.where(
-                                         np.logical_and(data_train.data_folds != VAL_FOLD,
-                                                        data_train.data_folds != TEST_FOLD))[0])
-dataloader_train = torch.utils.data.DataLoader(data_train_sub,
-                                               batch_size = BATCH_SIZE,
-                                               shuffle=True)
+data_test = dlem.dataset_dlem.DlemData(
+    DATA_FOLDER,
+    RES,
+    PATCH_SIZE,
+    overlap=OVERLAP,
+    offset=0,
+    chrom_filter=[TEST_CHROM]
+    )
 
-data_val_test = dlem.dataset_dlem.CombinedDataset(
-    SeqDataset(DATA_FOLDER),
-    dlem.dataset_dlem.ContactmapDataset(DATA_FOLDER, RES),
-    dlem.dataset_dlem.TrackDataset(DATA_FOLDER))
-
-data_test = torch.utils.data.Subset(data_val_test,
-                                    np.where(data_val_test.data_folds == TEST_FOLD)[0])
-data_val = torch.utils.data.Subset(data_val_test,
-                                   np.where(data_val_test.data_folds == VAL_FOLD)[0])
-
-dataloader_test = torch.utils.data.DataLoader(data_test, batch_size = BATCH_SIZE, shuffle=False)
-dataloader_val = torch.utils.data.DataLoader(data_val, batch_size = BATCH_SIZE, shuffle=False)
+trainer_data = LitTrainerData(data_train, data_test, data_val, BATCH_SIZE, OVERLAP, OFFSETS)
 
 seq_pooler = get_seq_pooler(args.seq_pooler_type)(
     LAYER_CHANNEL_NUMBERS,
     LAYER_STRIDES)
 
-model = get_header(args.head_type)(data_val_test.patch_dim,
-                                   data_val_test.track_dim,
+model = get_header(args.head_type)(data_train.patch_size,
+                                   data_train.track_dim,
                                    LAYER_CHANNEL_NUMBERS[-1],
-                                   data_val_test.start,
-                                   data_val_test.stop,
+                                   data_train.start,
+                                   data_train.stop,
                                    dlem.util.dlem,
                                    seq_pooler,
-                                   channel_per_route=NUMBER_OF_CHANNELS_PER_ROUTE)
+                                   channel_per_route=NUMBER_OF_CHANNELS_PER_ROUTE,
+                                   layer_num=HEAD_LAYER_NUM)
 
 model_training = LitTrainer(model,
                             LEARNING_RATE,
                             weighted_mse if LOSS_TYPE == 'weighted_mse' else torch.nn.MSELoss(),
-                            data_val_test.patch_dim,
-                            data_val_test.start,
-                            data_val_test.stop,
+                            data_train.patch_size,
+                            data_train.start,
+                            data_train.stop,
                             DEPTH,
                             metric_file_path=SAVE_FILE)
 
@@ -214,7 +229,6 @@ trainer = L.Trainer(accelerator='cuda',
 )
 
 trainer.fit(model=model_training,
-            train_dataloaders=dataloader_train,
-            val_dataloaders=dataloader_val)
+            datamodule=trainer_data)
 
-trainer.test(model_training, dataloader_test)
+trainer.test(model_training, datamodule=trainer_data)
