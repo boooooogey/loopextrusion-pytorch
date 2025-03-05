@@ -26,7 +26,7 @@ class LitTrainerData(L.LightningDataModule):
         return DataLoader(self.dataset_training, batch_size=self.batch_size, shuffle=True, num_workers=15)
 
     def val_dataloader(self):
-        return DataLoader(self.dataset_val, batch_size=self.batch_size, shuffle=False)
+        return DataLoader(self.dataset_val, batch_size=self.batch_size, shuffle=False, num_workers=15)
 
     def test_dataloader(self):
-        return DataLoader(self.dataset_test, batch_size=self.batch_size, shuffle=False)
+        return DataLoader(self.dataset_test, batch_size=self.batch_size, shuffle=False, num_workers=15)

@@ -238,6 +238,8 @@ class DlemData(Dataset):
         self.offset = offset
         if pool_bigwigs:
             self.res = resolution
+        else:
+            self.res = None
 
         self.chromosome_lengths = read_chromosome_lengths(os.path.join(path,
                                                                        "cell_types",

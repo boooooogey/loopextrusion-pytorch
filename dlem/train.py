@@ -74,6 +74,7 @@ parser.add_argument('--patience', type=int, default=25, help='Patience')
 parser.add_argument('--num-epoch', type=int, default=250, help='Number of epochs')
 parser.add_argument('--head-type', type=str, default='ForkedHead',)
 parser.add_argument('--seq-pooler-type', type=str, default='SequencePoolerAttention',)
+parser.add_argument('--seq-dim', type=int, default=2,)
 parser.add_argument('--resolution', type=int, default=10_000, help='Resolution of the contactmap')
 parser.add_argument('--save-file', type=str, default=None, help='Save the correlations as a file')
 parser.add_argument('--layer-channel-numbers', type=int, nargs='+', default=[4,8,8,8,8],
@@ -118,6 +119,7 @@ NUMBER_OF_CHANNELS_PER_ROUTE = args.number_of_channel_per_route
 SAVE_FILE = args.save_file
 HEAD_LAYER_NUM = args.head_layer_num
 POOL_BIGWIGS = args.pool_bigwigs
+SEQ_DIM = args.seq_dim
 
 if not os.path.exists(SAVE_FOLDER):
     os.mkdir(SAVE_FOLDER)
@@ -164,7 +166,7 @@ seq_pooler = get_seq_pooler(args.seq_pooler_type)(
 
 model = get_header(args.head_type)(data_train.patch_size,
                                    data_train.track_dim,
-                                   LAYER_CHANNEL_NUMBERS[-1],
+                                   SEQ_DIM, #LAYER_CHANNEL_NUMBERS[-1],
                                    data_train.start,
                                    data_train.stop,
                                    dlem.util.dlem,
@@ -226,21 +228,15 @@ wandb.login(key="d4cd96eb50ccb5168c4b750d269715d2cfbd8e44")
 wandb_logger = WandbLogger(name=f"cell_line_{TRAIN_CELL_LINE}_channel_per_route_{NUMBER_OF_CHANNELS_PER_ROUTE}_seq_pooler_{args.seq_pooler_type}_head_{args.head_type}_loss_{LOSS_TYPE}_lr_{LEARNING_RATE}_depth_{DEPTH}",
                            save_dir=SAVE_FOLDER)
 
-from lightning.pytorch.profilers import PyTorchProfiler 
-profiler = PyTorchProfiler()
-
 trainer = L.Trainer(accelerator='cuda',
                     devices=1,
                     max_epochs=NUM_EPOCH,
                     default_root_dir=SAVE_FOLDER,
                     callbacks=checkpoints,
-                    logger=wandb_logger,
-                    profiler=profiler
+                    logger=wandb_logger
 )
 
 trainer.fit(model=model_training,
             datamodule=trainer_data)
-
-print(profiler.summary())
 
 trainer.test(model_training, datamodule=trainer_data)

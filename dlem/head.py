@@ -411,15 +411,17 @@ class ForkedBasePairTrackHeadBinary(BaseHead):
                                      out_channels=out_dim, kernel_size=3, dilation=2, padding=2),
                               ReLU(),
                               Conv1d(in_channels=out_dim,
-                                     out_channels=out_dim, kernel_size=2, stride=2),
+                                     out_channels=out_dim,
+                                     groups=out_dim, kernel_size=2, stride=2),
                               ReLU())
 
         def trans_conv_unit_maker(in_dim, out_dim):
             return Sequential(ConvTranspose1d(in_channels=in_dim,
-                                              out_channels=out_dim, kernel_size=2, stride=2), 
+                                              out_channels=out_dim, kernel_size=2, stride=2),
                               ReLU(),
                               ConvTranspose1d(in_channels=out_dim,
                                               out_channels=out_dim,
+                                              groups=out_dim,
                                               kernel_size=3, dilation=2, padding=2),
                               ReLU())
 
