@@ -66,8 +66,9 @@ parser.add_argument('--overlap-contactmaps', type=int, required=True,
                     help='Overlap for the contactmaps')
 parser.add_argument('--patch-size', type=int, required=True,
                     help='Patchsize for the contactmaps')
-parser.add_argument('--test-chrom', type=str, default='chr4', help='Test fold')
-parser.add_argument('--val-chrom', type=str, default='chr5', help='Validation fold')
+parser.add_argument('--project-name', type=str, default="DLEM_runs", help='Project name for wandb.')
+parser.add_argument('--test-chrom', type=str, default='chr9', help='Test fold')
+parser.add_argument('--val-chrom', type=str, default='chr8', help='Validation fold')
 parser.add_argument('--learning-rate', type=float, default=0.0001, help='Learning rate')
 parser.add_argument('--head-layer-num', type=int, default=4, help='Head layer number')
 parser.add_argument('--patience', type=int, default=25, help='Patience')
@@ -120,6 +121,7 @@ SAVE_FILE = args.save_file
 HEAD_LAYER_NUM = args.head_layer_num
 POOL_BIGWIGS = args.pool_bigwigs
 SEQ_DIM = args.seq_dim
+PROJECT_NAME = args.project_name
 
 if not os.path.exists(SAVE_FOLDER):
     os.mkdir(SAVE_FOLDER)
@@ -133,8 +135,8 @@ data_train = dlem.dataset_dlem.DlemData(
     subselection=[TRAIN_CELL_LINE],
     overlap=OVERLAP,
     offset=OFFSETS[0],
-    #chrom_filter=[TEST_CHROM, VAL_CHROM]
-    chrom_selection=['chr7'],
+    chrom_filter=[TEST_CHROM, VAL_CHROM],
+    #chrom_selection=['chr7'],
     pool_bigwigs=POOL_BIGWIGS
     )
 
@@ -226,6 +228,7 @@ checkpoints += [
 
 wandb.login(key="d4cd96eb50ccb5168c4b750d269715d2cfbd8e44")
 wandb_logger = WandbLogger(name=f"cell_line_{TRAIN_CELL_LINE}_channel_per_route_{NUMBER_OF_CHANNELS_PER_ROUTE}_seq_pooler_{args.seq_pooler_type}_head_{args.head_type}_loss_{LOSS_TYPE}_lr_{LEARNING_RATE}_depth_{DEPTH}",
+                           project=PROJECT_NAME,
                            save_dir=SAVE_FOLDER)
 
 trainer = L.Trainer(accelerator='cuda',

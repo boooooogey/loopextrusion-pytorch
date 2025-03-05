@@ -491,6 +491,117 @@ class ForkedBasePairTrackHeadBinary(BaseHead):
         left_right = self.converter(tracks.to(dev), seq.to(dev))
         return self.dlem_output(diagonals, left_right[:, 0, :], left_right[:, 1, :], depth)
 
+class ForkedBasePairTrackHeadBinaryUnet(BaseHead):
+    """Predict contact map from Encode signals.
+    """
+    def __init__(self, size:int,
+                       track_dim:int,
+                       seq_dim:int,
+                       start_diagonal:int,
+                       stop_diagonal:int,
+                       dlem_func:callable,
+                       tail:Module,
+                       channel_per_route:int=3,
+                       layer_num:int = 6):
+
+        super(ForkedBasePairTrackHeadBinaryUnet, self).__init__(size,
+                                         track_dim,
+                                         seq_dim,
+                                         start_diagonal,
+                                         stop_diagonal,
+                                         dlem_func,
+                                         tail)
+
+        def conv_unit_maker(in_dim, out_dim):
+            return Sequential(Conv1d(in_channels=in_dim,
+                                     out_channels=out_dim, kernel_size=3, dilation=2, padding=2),
+                              ReLU(),
+                              Conv1d(in_channels=out_dim,
+                                     out_channels=out_dim,
+                                     groups=out_dim, kernel_size=2, stride=2),
+                              ReLU())
+
+        def trans_conv_unit_maker(in_dim, out_dim):
+            return Sequential(ConvTranspose1d(in_channels=in_dim,
+                                              out_channels=out_dim, kernel_size=2, stride=2),
+                              ReLU(),
+                              ConvTranspose1d(in_channels=out_dim,
+                                              out_channels=out_dim,
+                                              groups=out_dim,
+                                              kernel_size=3, dilation=2, padding=2),
+                              ReLU())
+
+        self.layer_num = layer_num
+        self.channel_per_route = channel_per_route
+        network_width = layer_num * channel_per_route
+
+        self.feature_batch_norm = BatchNorm1d(self.track_dim + self.seq_dim)
+
+        self.conv_first = Sequential(Conv1d(in_channels=self.track_dim + self.seq_dim,
+                                            out_channels=network_width,
+                                            kernel_size=3, dilation=2, padding=2),
+                                    ReLU())
+
+        self.convs  = [conv_unit_maker(network_width, network_width)]
+        self.convs += [conv_unit_maker(network_width,
+                                       network_width) for i in range(layer_num-1,0,-1)]
+
+        self.convs = ModuleList(self.convs)
+        self.trans_convs = ModuleList([
+            trans_conv_unit_maker(network_width,
+                                  network_width) for i in range(layer_num)
+            ]
+        )
+        self.mixer = Sequential(Conv1d(in_channels=network_width,
+                                       out_channels=2,
+                                       kernel_size=1),
+                                Sigmoid()
+                     )
+
+        self.raw_track_norm = nn.BatchNorm1d(track_dim)
+
+    def converter(self, tracks:torch.Tensor, seq:torch.Tensor) -> torch.Tensor:
+        """Converts the input epigenetic signals into DLEM parameters.
+
+        Args:
+            signal (ArrayLike): epigenetic tracks
+
+        Returns:
+            ArrayLike: parameters, p_l, p_r
+        """
+        layer_outs = []
+        #difference with ForkedHead is that we are using the tail for the tracks too.
+        tmp = self.tail(torch.cat([self.raw_track_norm(tracks), seq], axis=-2))
+        tmp = self.feature_batch_norm(tmp)
+        tmp = self.conv_first(tmp)
+        layer_outs = [tmp]
+        for n, conv in enumerate(self.convs[:-1]):
+            tmp = conv(tmp)
+            layer_outs.append(tmp)
+        tmp = self.convs[-1](tmp)
+        for n, trans_convs in enumerate(self.trans_convs):
+            tmp = trans_convs(tmp) + layer_outs[-(n+1)]
+        return self.mixer(tmp)
+
+    def forward(self, diagonals:torch.Tensor,
+                      tracks:torch.Tensor,
+                      seq:torch.Tensor,
+                      depth:int) -> torch.Tensor:
+        """forward operation for the network.
+
+        Args:
+            curr_diag (ArrayLike): current diagonal. current state.
+            diag_i (int): diagonal index for the current state.
+            transform (bool, optional): Should the output converted into log space and centered.
+            Defaults to True.
+
+        Returns:
+            ArrayLike: prediction for the next state.
+        """
+        dev = self.mixer[0].weight.device
+        left_right = self.converter(tracks.to(dev), seq.to(dev))
+        return self.dlem_output(diagonals, left_right[:, 0, :], left_right[:, 1, :], depth)
+
 class ForkedBasePairTrackHead(ForkedHead):
     """Predict contact map from Encode signals.
     """
