@@ -12,7 +12,8 @@ from . import dataset_dlem_prev
 from . import seq_pooler
 from . import trainer
 from . import trainer_data
-
+from . import non_loopextrusion_factor_model
+from . import trainer_non_loop
 
 all_functions = {name: obj for name, obj in inspect.getmembers(util) if inspect.isfunction(obj)}
 
@@ -31,3 +32,5 @@ __all__.append('dataset_dlem_prev')
 __all__.append('seq_pooler')
 __all__.append('trainer')
 __all__.append('trainer_data')
+__all__.append('non_loopextrusion_factor_model')
+__all__.append('trainer_non_loop')

@@ -7,10 +7,11 @@ import torch
 from torch import optim
 from dlem import util
 
-class LitTrainer(L.LightningModule):
+class LitTrainerStage2(L.LightningModule):
     """Trainer class for DLEM.
     """
-    def __init__(self, model,
+    def __init__(self, model_loop,
+                 model_non_loop,
                  learning_rate,
                  loss,
                  patch_dim,
@@ -20,13 +21,19 @@ class LitTrainer(L.LightningModule):
                  metric_file_path=None):
         super().__init__()
         self.save_hyperparameters()
-        self.model = model
+        self.model_loop = model_loop
+
+        #freeze the loop model
+        for param in self.model_loop.parameters():
+            param.requires_grad = False
+
+        self.model_non_loop = model_non_loop
+
         self.learning_rate = learning_rate
         self.loss = loss
         self.patch_dim = patch_dim
         self.start = start
         self.stop = stop
-        self.depth = depth
         self.index_diagonal = util.diag_index_for_mat(self.patch_dim, self.start, self.stop)
         self._all_the_metrics_val = dict()
         self._all_the_metrics_test = dict()
@@ -42,11 +49,16 @@ class LitTrainer(L.LightningModule):
         #if next(self.model.parameters()).device != self.device_model:
         #    self.model = self.model.to(self.device_model)
 
-        depth = np.random.choice(range(1, self.depth))
         seq, diagonals, tracks = batch
-        out = self.model(diagonals, tracks, seq, depth)
-        offset = (2*self.patch_dim - 2*self.start - depth + 1) * depth // 2
-        loss = self.loss(out, diagonals[:, offset:])
+        diag_init = torch.from_numpy(np.ones((diagonals[0].shape[0], self.patch_dim - self.start),
+                                             dtype=np.float32) * self.patch_dim)
+        out = self.model_loop.contact_map_prediction(tracks,
+                                                seq,
+                                                diag_init[:tracks.shape[0]])
+        out += self.model_non_loop(tracks.to(self.device)).cpu()
+        diagonals = diagonals[:, self.index_diagonal(self.start)[-1]+1:].cpu()
+
+        loss = self.loss(out, diagonals)
         self.training_loss.append(loss.detach().cpu().numpy())
         return loss
 
@@ -76,9 +88,10 @@ class LitTrainer(L.LightningModule):
         preds = []
         for diagonal, track, name in zip(diagonals, tracks, names):
             diagonal = diagonal[:, self.index_diagonal(self.start)[-1]+1:].cpu()
-            out = self.model.contact_map_prediction(track,
+            out = self.model_loop.contact_map_prediction(track,
                                                     seq,
                                                     diag_init[:track.shape[0]])
+            out += self.model_non_loop(track.to(self.device)).cpu()
             preds.append(out)
             corr = util.pairwise_corrcoef(out,
                                           diagonal)
@@ -158,7 +171,8 @@ class LitTrainer(L.LightningModule):
             )
 
     def configure_optimizers(self):
-        optimizer = optim.Adam(self.parameters(), lr=self.learning_rate)
+        optimizer = optim.Adam(self.model_non_loop.parameters(),
+                               lr=self.learning_rate)
         scheduler = optim.lr_scheduler.ReduceLROnPlateau(
             optimizer, mode="max", patience=10, factor=0.5, verbose=True
         )
