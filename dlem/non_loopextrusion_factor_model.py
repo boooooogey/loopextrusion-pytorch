@@ -29,6 +29,8 @@ class NonLoopExt(torch.nn.Module):
             torch.nn.ReLU(),
             torch.nn.BatchNorm1d(rank_k),
             torch.nn.MaxPool1d(kernel_size=10),
+            torch.nn.Conv1d(in_channels=rank_k, out_channels=rank_k,
+                            kernel_size=1),
         )
         self.triu_i = np.concatenate([np.arange(patch_size-n) for n in range(1, patch_size)])
         self.triu_j = np.concatenate([np.arange(n, patch_size) for n in range(1, patch_size)])
@@ -36,4 +38,4 @@ class NonLoopExt(torch.nn.Module):
         x = self.layers(x)
         b, c, l = x.shape
         x = x.reshape(b, c, l, 1) + x.reshape(b, c, 1, l)
-        return x.sum(axis=1)[:, self.triu_i, self.triu_j]
+        return util.diagonal_normalize(x.sum(axis=1))[:, self.triu_i, self.triu_j]

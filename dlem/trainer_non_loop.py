@@ -18,6 +18,7 @@ class LitTrainerStage2(L.LightningModule):
                  start,
                  stop,
                  depth,
+                 alpha = 0.2,
                  metric_file_path=None):
         super().__init__()
         self.save_hyperparameters()
@@ -34,6 +35,7 @@ class LitTrainerStage2(L.LightningModule):
         self.patch_dim = patch_dim
         self.start = start
         self.stop = stop
+        self.alpha = alpha
         self.index_diagonal = util.diag_index_for_mat(self.patch_dim, self.start, self.stop)
         self._all_the_metrics_val = dict()
         self._all_the_metrics_test = dict()
@@ -55,7 +57,7 @@ class LitTrainerStage2(L.LightningModule):
         out = self.model_loop.contact_map_prediction(tracks,
                                                 seq,
                                                 diag_init[:tracks.shape[0]])
-        out += self.model_non_loop(tracks.to(self.device)).cpu()
+        out = (1-self.alpha) * out + self.alpha * self.model_non_loop(tracks.to(self.device)).cpu()
         diagonals = diagonals[:, self.index_diagonal(self.start)[-1]+1:].cpu()
 
         loss = self.loss(out, diagonals)
@@ -91,7 +93,7 @@ class LitTrainerStage2(L.LightningModule):
             out = self.model_loop.contact_map_prediction(track,
                                                     seq,
                                                     diag_init[:track.shape[0]])
-            out += self.model_non_loop(track.to(self.device)).cpu()
+            out = (1-self.alpha) * out + self.alpha * self.model_non_loop(track.to(self.device)).cpu()
             preds.append(out)
             corr = util.pairwise_corrcoef(out,
                                           diagonal)
