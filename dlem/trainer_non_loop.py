@@ -173,14 +173,15 @@ class LitTrainerStage2(L.LightningModule):
     def configure_optimizers(self):
         optimizer = optim.Adam(self.model_non_loop.parameters(),
                                lr=self.learning_rate)
-        scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-            optimizer, mode="max", patience=10, factor=0.5, verbose=True
-        )
-        return {
-            "optimizer": optimizer,
-            "lr_scheduler": {
-                "scheduler": scheduler,
-                "monitor": "validation_corr_H1",
-                "frequency": 1,
-            },
-        }
+        return optimizer
+        #scheduler = optim.lr_scheduler.ReduceLROnPlateau(
+        #    optimizer, mode="max", patience=10, factor=0.5, verbose=True
+        #)
+        #return {
+        #    "optimizer": optimizer,
+        #    "lr_scheduler": {
+        #        "scheduler": scheduler,
+        #        "monitor": "validation_corr_H1",
+        #        "frequency": 1,
+        #    },
+        #}
