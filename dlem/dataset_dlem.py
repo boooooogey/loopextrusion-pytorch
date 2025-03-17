@@ -305,6 +305,16 @@ class DlemData(Dataset):
 
         self.patches = filter_regions(self.patches, self.avoid_regions)
 
+    def set_patches(self, patches:pd.DataFrame):
+        """Set the patches to the given patches.
+
+        Args:
+            patches (pd.DataFrame): Patches to be set.
+        """
+        if np.any(patches.iloc[:, 2] - patches.iloc[:, 1] != self.patch_size * self.resolution):
+            raise ValueError("Patch size mismatch!")
+        self.patches = patches
+
     def __len__(self):
         return len(self.patches)
 
