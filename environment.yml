@@ -1,0 +1,24 @@
+name: env
+channels:
+  - conda-forge
+  - bioconda
+  - anaconda
+  - pytorch
+  - nvidia
+dependencies:
+  - pip
+  - python
+  - setuptools
+  - numpy
+  - readline
+  - pandas
+  - einops
+  - pybigwig
+  - cooler
+  - cooltools
+  - tqdm
+  - pyranges
+  - jupyterlab
+  - pip:
+    - torch
+    - lightning

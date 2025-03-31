@@ -1,0 +1,37 @@
+secrets:
+    github-token:
+        file: "${git_token_ext}"
+    gs-token:
+        file: "${gs_token_ext}"
+services:
+
+  dlem:
+    image: dlem:latest
+    container_name: dlem-run
+    build:
+      dockerfile: Dockerfile
+      context: .
+      secrets:
+        - github-token
+    env_file:
+      # Linux / MacOS
+      - ${repo_dir}/dlem_defaults.env
+      # Windows
+      #- ${repo_dir}/dlem_config.ps1
+    restart: no
+
+  dlem-data:
+    image: dlem:latest
+    container_name: dlem-data
+    env_file:
+      # Linux / MacOS
+      - ${repo_dir}/dlem_defaults.env
+      # Windows
+      #- ${repo_dir}/dlem_config.ps1
+    entrypoint: pytest
+    command: -k test_dlem_grab_data
+    volumes:
+      - "${base_dir}:${base_dir_int}"
+      - "${repo_dir}:${repo_dir_int}"
+    secrets:
+      - gs-token
