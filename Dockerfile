@@ -59,7 +59,6 @@ RUN --mount=type=secret,id=github-token,dst=/run/secrets/git_token \
     GIT_ACCESS_TOKEN=`cat /run/secrets/git_token` && \
 	mkdir -p ${LOCAL_REPO} && \
 	cd ${LOCAL_BASE} && \
-	pip install git+https://github.com/boooooogey/loopextrusion-pytorch.git && \
 	git clone https://github.com/boooooogey/loopextrusion-pytorch.git && \
 	chmod -R 0777 ${LOCAL_REPO} && \
 	unset GIT_ACCESS_TOKEN
