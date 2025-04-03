@@ -1,8 +1,8 @@
 secrets:
     github-token:
         file: "${git_token_ext}"
-    gs-token:
-        file: "${gs_token_ext}"
+#    gs-token:
+#        file: "${gs_token_ext}"
 services:
 
   dlem:
@@ -33,5 +33,5 @@ services:
     volumes:
       - "${base_dir}:${base_dir_int}"
       - "${repo_dir}:${repo_dir_int}"
-    secrets:
-      - gs-token
+#    secrets:
+#      - gs-token
