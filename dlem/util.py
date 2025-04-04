@@ -223,6 +223,81 @@ def train(model:Module,
 
     return best_loss_model, best_corr_model, np.array(arr_loss), np.array(arr_corr)
 
+
+
+
+
+
+def train_w_depth(model:Module,
+          optimizer:Optimizer,
+          scheduler:LRScheduler,
+          loss:Module,
+          data:ArrayLike,
+          diag_start:int,
+          diag_end:int,
+          weights: ArrayLike,
+          dev:device=None,
+          num_epoch:int=100,
+          depth: int=3,
+          parameter_lower_bound:float=1e-9,
+          parameter_upper_bound:float=1.0) -> Tuple[Module, Module, ArrayLike, ArrayLike]:
+
+    data = torch.tensor(data).to(dev)
+    init_diag = torch.ones((data.shape[0], data.shape[1])) * data.shape[1]
+    init_diag = init_diag.to(dev)
+    best_corr = -torch.inf
+    arr_corr = []
+    best_loss = torch.inf
+    arr_loss = []
+    model = model.to(dev)
+    weights = torch.tensor(weights).to(dev)
+
+    train_ii = diagonal_region_indices_from(data, diag_start, diag_end)
+
+    for e in range(num_epoch):
+        optimizer.zero_grad()
+        loss_total = 0
+        pred_map = model.contact_map_prediction(init_diag)
+        pred_map = torch.exp(diagonal_normalize(torch.log(pred_map)))
+        curr_cor = mat_corr(pred_map[train_ii], data[train_ii])
+        arr_corr.append(curr_cor.detach().cpu().numpy())
+        for diag_i in range(diag_start, diag_end):   # as long as diag_end is not final patch, it works just fine.
+        
+            # diagonal 1 from data
+            pred_diag = model(get_diags(data, diag_i), diag_i, True)
+                        
+            for pred_diag_i in range(1, depth):  # the first one is already predicted
+                loss_total += loss(pred_diag, torch.log(get_diags(data, diag_i+pred_diag_i)), get_diags(weights, diag_i+pred_diag_i) )
+            
+                pred_diag = model(torch.exp( pred_diag) , diag_i+pred_diag_i, True)  
+            
+
+            loss_total += loss(pred_diag, torch.log(get_diags(data, diag_i+pred_diag_i+1)), get_diags(weights, diag_i+pred_diag_i+1)  )    
+            
+            # how do we compute loss? based on 2nd diagonal? based on both? interesting to consider either option
+        if loss_total < best_loss:
+            best_loss = loss_total
+            best_loss_model = copy.deepcopy(model)
+        if curr_cor > best_corr:
+            best_corr = curr_cor
+            best_corr_model = copy.deepcopy(model)
+
+        loss_total.backward()
+        optimizer.step()
+        arr_loss.append(loss_total.detach().cpu().numpy())
+        scheduler.step(curr_cor)
+
+        model.project_to_constraints(parameter_lower_bound, parameter_upper_bound)
+
+
+    return best_loss_model, best_corr_model, np.array(arr_loss), np.array(arr_corr)
+
+
+
+
+
+
+
 def plot_pred_data_on_same_ax(mat:ArrayLike,
                               diag_ignore:int,
                               diag_ignore_off:int,
