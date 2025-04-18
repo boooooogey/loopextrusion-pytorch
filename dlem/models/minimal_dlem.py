@@ -29,7 +29,7 @@ class DLEM(Module):
         """
         super(DLEM, self).__init__()
 
-        if left_init == None:
+        if left_init is None:
             self.left = Parameter(torch.ones(n) * 0.99, requires_grad=True)
             self.right = Parameter(torch.ones(n) * 0.99, requires_grad=True)
             
@@ -38,7 +38,7 @@ class DLEM(Module):
             self.left = Parameter(left_init, requires_grad=True)
             self.right = Parameter(right_init, requires_grad=True)
         
-        if detach == None:
+        if detach is None:
             res_detach = {10000:0.025,
                            5000:0.0125,
                            2000:0.005}
