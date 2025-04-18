@@ -224,10 +224,6 @@ def train(model:Module,
     return best_loss_model, best_corr_model, np.array(arr_loss), np.array(arr_corr)
 
 
-
-
-
-
 def train_w_depth(model:Module,
           optimizer:Optimizer,
           scheduler:LRScheduler,
@@ -242,24 +238,40 @@ def train_w_depth(model:Module,
           parameter_lower_bound:float=1e-9,
           parameter_upper_bound:float=1.0) -> Tuple[Module, Module, ArrayLike, ArrayLike]:
 
-    data = torch.tensor(data).to(dev)
+    # data = torch.tensor(data).to(dev)
+    # weights = torch.tensor(weights).to(dev)
+
+    if isinstance(data, torch.Tensor):
+        data = data.clone().detach().to(dev)
+    else:
+        data = torch.tensor(data).to(dev)
+
+    if isinstance(weights, torch.Tensor):
+        weights = weights.clone().detach().to(dev)
+    else:
+        weights = torch.tensor(weights).to(dev)  
+
     init_diag = torch.ones((data.shape[0], data.shape[1])) * data.shape[1]
     init_diag = init_diag.to(dev)
     best_corr = -torch.inf
     arr_corr = []
     best_loss = torch.inf
     arr_loss = []
-    model = model.to(dev)
-    weights = torch.tensor(weights).to(dev)
+    model = model.to(dev)      
+
+    #best_loss_model = copy.deepcopy(model)
+    #best_corr_model = copy.deepcopy(model)
 
     train_ii = diagonal_region_indices_from(data, diag_start, diag_end)
 
-    for e in range(num_epoch):
+    for e in range(num_epoch): 
         optimizer.zero_grad()
         loss_total = 0
         pred_map = model.contact_map_prediction(init_diag)
         pred_map = torch.exp(diagonal_normalize(torch.log(pred_map)))
+
         curr_cor = mat_corr(pred_map[train_ii], data[train_ii])
+        
         arr_corr.append(curr_cor.detach().cpu().numpy())
         for diag_i in range(diag_start, diag_end):   # as long as diag_end is not final patch, it works just fine.
         
@@ -790,3 +802,86 @@ def pairwise_corrcoef(x:ArrayLike, y:ArrayLike) -> ArrayLike:
     x = (x - x.mean(dim=1, keepdim=True))/(x.std(dim=1, keepdim=True))
     y = (y - y.mean(dim=1, keepdim=True))/(y.std(dim=1, keepdim=True))
     return (x * y).mean(dim=1)
+
+
+
+
+class PowerLawExpDecayModel(torch.nn.Module):
+    def __init__(self, a, b, c, d):
+        super(PowerLawExpDecayModel, self).__init__()
+        # Initialize parameters as learnable
+        '''
+        self.a = nn.Parameter(torch.tensor(0.05, dtype=torch.float32))
+        self.b = nn.Parameter(torch.tensor(-2.5/2, dtype=torch.float32))
+        self.c = nn.Parameter(torch.tensor(0.03, dtype=torch.float32))
+        self.d = nn.Parameter(torch.tensor(0.015, dtype=torch.float32))
+        '''
+        self.a = torch.nn.Parameter(torch.tensor(a, dtype=torch.float32))
+        self.b = torch.nn.Parameter(torch.tensor(b, dtype=torch.float32))
+        self.c = torch.nn.Parameter(torch.tensor(c, dtype=torch.float32))
+        self.d = torch.nn.Parameter(torch.tensor(d, dtype=torch.float32))
+        
+    def forward(self, x):
+        # Compute the output of the function
+        return self.a * (x ** self.b + self.c * torch.exp(-self.d * x))
+    
+
+def get_detachment_rate(res, hic_matrix):
+
+    # get the diagonal means
+    # get the diagonal means fit
+    # return detach
+
+    a_init = 0.05
+    b_init = -3/2
+    c_init = 0.1
+    d_init = 0.01
+
+    n_diagonals = int(3_750_000 / res) 
+    diagonal_means = np.zeros(n_diagonals)
+
+    for d in range(n_diagonals):
+        diagonal_means[d] = np.nanmean( np.diag(hic_matrix, k=d ) )
+
+    model = PowerLawExpDecayModel(a_init, b_init, c_init, d_init) #PowerLawDecayModel() # PowerLawExpDecayModel() # GaussianChainExpDecayModel()  #PowerLawExpDecayModel() 
+
+    skip_first_k_diag = 7  # MSE loss gives nan if you include first diagonal. first few diagonals are unreliable due to additional effects from ligation
+    distance = (np.arange(skip_first_k_diag, n_diagonals , 1)).astype(np.float32) + 0.5
+    diagonal_means = diagonal_means[skip_first_k_diag:].astype(np.float32)
+
+    diagonal_mean_tensor = torch.tensor(diagonal_means)
+    distance_tensor = torch.tensor(distance)
+
+    criterion = torch.nn.MSELoss()
+    # optimizer = optim.Adam(model.parameters(), lr=0.01)
+    optimizer = torch.optim.LBFGS(model.parameters(), lr=0.01)
+
+    num_epochs = 200
+
+    def closure():
+        optimizer.zero_grad()   # Zero the gradients
+        outputs = model(distance_tensor)  # Forward pass
+        loss = criterion(torch.log(outputs), torch.log(diagonal_mean_tensor))
+        loss.backward()  # Compute gradients
+        return loss  # Return loss value
+        
+    for epoch in range(num_epochs):
+        model.train()
+        
+        # Forward pass
+        outputs = model(distance_tensor)
+        loss = criterion(torch.log(outputs), torch.log(diagonal_mean_tensor))
+        
+        # Backward pass and optimization
+        optimizer.zero_grad()  # Zero the gradients
+        loss.backward()       # Compute gradients
+        #optimizer.step()      # Update parameters
+        optimizer.step(closure)      # Update parameters
+
+        with torch.no_grad():
+            model.c.clamp_(min=0.00)
+        
+        if (epoch + 1) % 100 == 0:
+            print(f'Epoch [{epoch + 1}/{num_epochs}], Loss: {loss.item():.4f}')
+
+    return model.d.item()

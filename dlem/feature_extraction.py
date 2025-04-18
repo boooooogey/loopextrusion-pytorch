@@ -9,16 +9,26 @@ from numpy.typing import ArrayLike
 from . import util
 from . import load_model
 
-def train_extractor(patch:ArrayLike,
+# start here: replace train with train_w_depth 
+
+# things to make sure: input patch is in both cases normalized exponential patch!!!
+
+
+def train_extractor(patch:ArrayLike,  # input is in log
+                    res:int,
                     diag_stop:int,
+                    depth: int,
                     learning_rate:float,
                     arch:str,
                     diag_start:int,
                     loss:torch.nn.Module,
+                    weights: ArrayLike,
                     patience:int,
                     num_epoch:int,
                     dev_name:str,
+                    detach:float=None,
                     **kwargs:Any) -> Tuple[torch.nn.Module,torch.nn.Module,np.ndarray,np.ndarray]:
+    
     """Train the feature extractor model and return the best models and loss arrays.
 
     Args:
@@ -39,21 +49,36 @@ def train_extractor(patch:ArrayLike,
     """
     dev = torch.device(dev_name)
     architecture = load_model(arch)
-    model = architecture(patch.shape[0])
+    # left_init:ArrayLike,
+    #                   right_init:ArrayLike,
+    #                   detach:float
+
+    if detach == None:
+        res_detach = {10000:0.025,
+                      5000:0.0125,
+                      2000:0.005}
+        detach = [res_detach[res]]
+
+
+    model = architecture(n=patch.shape[0], res=res, detach=detach) # for now! later, you want to pass the detach rate as well; and L_init and R_init, if you start from coarser res.
+
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=patience, mode="max")
-    best_loss_model, best_corr_model, arr_loss, arr_corr = util.train(
-        model,
-        optimizer,
-        scheduler,
-        loss,
-        np.exp(patch)[np.newaxis],
-        diag_start,
-        diag_stop,
-        dev=dev,
-        num_epoch=num_epoch,
-        **kwargs)
-    return best_loss_model, best_corr_model, arr_loss, arr_corr
+
+    best_loss_model, best_corr_model, loss_arr, arr_corr = util.train_w_depth(model, optimizer,
+                                                  scheduler, loss, 
+                                                  np.exp(patch)[np.newaxis], # WEIGHT, make sure that the patch is in log space first before you exponentiate. checked --> it is
+                                                  diag_start,  #  int(3*10/kres); specify them elsewhere
+                                                  diag_stop, 
+                                                  weights = weights,
+                                                  dev = dev,
+                                                  num_epoch=num_epoch,
+                                                  depth=depth,
+                                                  **kwargs) 
+
+    return best_loss_model, best_corr_model, loss_arr, arr_corr
+
+
 
 def plot_model(patch:ArrayLike,
                best_corr_model:torch.nn.Module,
@@ -88,12 +113,18 @@ def plot_model(patch:ArrayLike,
     plt.savefig(plot_path)
     plt.close()
 
-def extractor(patch:ArrayLike,
+# that's the function that goes to dlem_genome
+
+def extractor(patch:ArrayLike,  # # this is in log!
+              res:int,
               diag_stop:int,
+              depth: int,
+              detach:float=None,
               learning_rate:float=0.5,
-              arch:str="netdlem2",
+              arch:str="minimal_dlem",
               diag_start:int=1,
               loss:Union[torch.nn.Module,None]=None,
+              weights: ArrayLike=None,
               patience:int=25,
               num_epoch:int=100,
               dev_name:str='cuda',
@@ -131,19 +162,55 @@ def extractor(patch:ArrayLike,
     """
     if loss is None:
         loss = torch.nn.MSELoss(reduction='mean')
+
+    '''    
     if do_plot and (plot_path is None):
         raise ValueError("Plotting turned on however path to save is not provided.")
-    _, best_corr_model, _, arr_corr =train_extractor(patch,
-                                                     diag_stop,
-                                                     learning_rate,
-                                                     arch,
-                                                     diag_start,
-                                                     loss,
-                                                     patience,
-                                                     num_epoch,
-                                                     dev_name,
-                                                     **kwargs)
+    '''
+
+    if detach == None:
+        res_detach = {10000:0.025,
+                      5000:0.0125,
+                      2000:0.005}
+        detach = [res_detach[res]]
+
+    best_loss_model, best_corr_model, loss_arr, arr_corr = train_extractor(patch,  # this patch is in log
+                                                                            res,
+                                                                            diag_stop,
+                                                                            depth,
+                                                                            learning_rate,
+                                                                            arch,
+                                                                            diag_start,
+                                                                            loss,
+                                                                            weights,
+                                                                            patience,
+                                                                            num_epoch,
+                                                                            dev_name,
+                                                                            detach,
+                                                                            **kwargs)
+    
     params = best_corr_model.return_parameters()
+
+    '''
     if do_plot:
         plot_model(patch, best_corr_model, dev_name, diag_start, diag_stop, params, plot_path)
+    '''
+
+    if do_plot:
+        import seaborn as sns
+        
+        corr_pred = best_corr_model.contact_map_prediction(torch.ones((1, patch.shape[0]), device='cpu') * 1.0 ).detach().cpu().numpy()   # patch_normalized.shape[0]
+        corr_pred = util.diagonal_normalize(np.log(corr_pred))
+        corr_pred = corr_pred[0]
+        flat_patch = patch.flatten()
+        flat_pred = corr_pred.flatten()
+        patch_correlation = np.corrcoef( flat_patch,flat_pred )[0,1]
+        corr_total_patch = np.triu(patch) + np.tril(corr_pred)
+        plt.figure()
+        plt.matshow( corr_total_patch, cmap='vlag')
+        plt.title(f"corr={patch_correlation:.2f}")
+
+
     return params, np.max(arr_corr)
+
+

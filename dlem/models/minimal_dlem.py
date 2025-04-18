@@ -1,5 +1,5 @@
 
-from typing import Tuple
+from typing import Tuple, List
 from torch.nn import Module
 from torch.nn import Parameter
 import torch
@@ -8,26 +8,46 @@ from numpy.typing import ArrayLike
 class DLEM(Module):
     """Differentiable loop extrusion model in pytorch.
     """
-    def __init__(self, left_init:ArrayLike,
-                       right_init:ArrayLike,
-                       detach:float
-                       ):
-        """_summary_
 
+
+    def __init__(self, 
+                 n:int,   # window size
+                 res: int,  # resolution
+                 left_init:ArrayLike=None,
+                 right_init:ArrayLike=None,
+                 detach:float=None
+                ):
+        
+        """Initialize DLEM model.
+    
         Args:
-        
-            
-        left: blocks left leg
-        right: blocks right leg
+            n: int, window size
+            res: int, resolution
+            left_init: blocks left leg initialization values
+            right_init: blocks right leg initialization values
+            detach: scalar detach rate
         """
-        left_init, right_init, detach = torch.Tensor(left_init), torch.Tensor(right_init), torch.Tensor([detach])
         super(DLEM, self).__init__()
-        # self.const_detach = Parameter(torch.tensor(0.995), requires_grad = free_const_detach)
-        self.n = len(left_init)
-        self.left = Parameter(left_init, requires_grad=True)
-        self.right = Parameter(right_init, requires_grad=True)
-        self.detach = Parameter(detach, requires_grad=False)
+
+        if left_init == None:
+            self.left = Parameter(torch.ones(n) * 0.99, requires_grad=True)
+            self.right = Parameter(torch.ones(n) * 0.99, requires_grad=True)
+            
+        else:
+            left_init, right_init = torch.Tensor(left_init), torch.Tensor(right_init)
+            self.left = Parameter(left_init, requires_grad=True)
+            self.right = Parameter(right_init, requires_grad=True)
         
+        if detach == None:
+            res_detach = {10000:0.025,
+                           5000:0.0125,
+                           2000:0.005}
+            self.detach = torch.Tensor([res_detach[res]])
+
+        else:
+            self.detach = torch.Tensor([detach])    
+        
+        self.n = n
 
     def forward(self,
                 curr_diag:ArrayLike,
@@ -114,5 +134,11 @@ class DLEM(Module):
                 )
 
 
+    def return_parameter_names(self) -> List[str]:
+            """Return the parameter names.
 
+            Returns:
+                List[str]: parameter names
+            """
+            return ["left", "right"]
 
