@@ -9,7 +9,7 @@ dependencies:
   - pip
   - python
   - setuptools
-  - numpy
+  - numpy <= 1.26.4
   - readline
   - pandas
   - einops
@@ -19,7 +19,8 @@ dependencies:
   - tqdm
   - pyranges
   - jupyterlab
+  - cython
   - pip:
     - torch
     - lightning
-    - git+https://github.com/boooooogey/loopextrusion-pytorch.git
+#    - git+https://github.com/boooooogey/loopextrusion-pytorch.git
