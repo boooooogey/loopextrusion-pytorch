@@ -240,7 +240,6 @@ def train_w_depth(model:Module,
 
     # data = torch.tensor(data).to(dev)
     # weights = torch.tensor(weights).to(dev)
-
     if isinstance(data, torch.Tensor):
         data = data.clone().detach().to(dev)
     else:
@@ -263,7 +262,7 @@ def train_w_depth(model:Module,
     #best_corr_model = copy.deepcopy(model)
 
     train_ii = diagonal_region_indices_from(data, diag_start, diag_end)
-
+    
     for e in range(num_epoch): 
         optimizer.zero_grad()
         loss_total = 0

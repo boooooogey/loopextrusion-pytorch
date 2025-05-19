@@ -48,6 +48,7 @@ def train_extractor(patch:ArrayLike,  # input is in log
         loss model, best correlation model, loss array, and correlation array.
     """
     dev = torch.device(dev_name)
+    torch.set_default_device(dev)
     architecture = load_model(arch)
     # left_init:ArrayLike,
     #                   right_init:ArrayLike,
@@ -59,12 +60,10 @@ def train_extractor(patch:ArrayLike,  # input is in log
                       2000:0.005}
         detach = [res_detach[res]]
 
-
     model = architecture(n=patch.shape[0], res=res, detach=detach) # for now! later, you want to pass the detach rate as well; and L_init and R_init, if you start from coarser res.
 
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=patience, mode="max")
-
     best_loss_model, best_corr_model, loss_arr, arr_corr = util.train_w_depth(model, optimizer,
                                                   scheduler, loss, 
                                                   np.exp(patch)[np.newaxis], # WEIGHT, make sure that the patch is in log space first before you exponentiate. checked --> it is
@@ -198,8 +197,7 @@ def extractor(patch:ArrayLike,  # # this is in log!
 
     if do_plot:
         import seaborn as sns
-        
-        corr_pred = best_corr_model.contact_map_prediction(torch.ones((1, patch.shape[0]), device='cpu') * 1.0 ).detach().cpu().numpy()   # patch_normalized.shape[0]
+        corr_pred = best_corr_model.contact_map_prediction(torch.ones((1, patch.shape[0]), device=dev_name) * 1.0 ).detach().cpu().numpy()   # patch_normalized.shape[0]
         corr_pred = util.diagonal_normalize(np.log(corr_pred))
         corr_pred = corr_pred[0]
         flat_patch = patch.flatten()

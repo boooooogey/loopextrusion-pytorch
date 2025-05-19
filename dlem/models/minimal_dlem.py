@@ -29,12 +29,15 @@ class DLEM(Module):
         """
         super(DLEM, self).__init__()
 
+        dev = torch.get_default_device()
+        
         if left_init is None:
             self.left = Parameter(torch.ones(n) * 0.99, requires_grad=True)
             self.right = Parameter(torch.ones(n) * 0.99, requires_grad=True)
             
         else:
-            left_init, right_init = torch.Tensor(left_init), torch.Tensor(right_init)
+            (left_init, right_init) = (torch.tensor(left_init, device=dev, dtype=torch.float64), 
+                                       torch.tensor(right_init, device=dev, dtype=torch.float64) )
             self.left = Parameter(left_init, requires_grad=True)
             self.right = Parameter(right_init, requires_grad=True)
         
@@ -42,10 +45,9 @@ class DLEM(Module):
             res_detach = {10000:0.025,
                            5000:0.0125,
                            2000:0.005}
-            self.detach = torch.Tensor([res_detach[res]])
-
+            self.detach = torch.tensor([res_detach[res]], device=dev, dtype=torch.float64)
         else:
-            self.detach = torch.Tensor([detach])    
+            self.detach = torch.tensor([detach], device=dev, dtype=torch.float64)    
         
         self.n = n
 
@@ -80,7 +82,6 @@ class DLEM(Module):
         mass_in += curr_diag[:, index_curr_diag_left] * self.left[index_in_left]
 
         mass_out = self.right[index_out_right] + self.left[index_out_left]
-
         mass_out += self.detach[0]
     
         # next_diag_pred = self.const * mass_in / mass_out.reshape(1,-1)
