@@ -258,8 +258,8 @@ def train_w_depth(model:Module,
     arr_loss = []
     model = model.to(dev)      
 
-    #best_loss_model = copy.deepcopy(model)
-    #best_corr_model = copy.deepcopy(model)
+    best_loss_model = copy.deepcopy(model)
+    best_corr_model = copy.deepcopy(model)
 
     train_ii = diagonal_region_indices_from(data, diag_start, diag_end)
     

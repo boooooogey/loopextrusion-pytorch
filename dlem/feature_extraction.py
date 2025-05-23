@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 import torch
 import torch.optim as optim
 import numpy as np
+import seaborn as sns
 from numpy.typing import ArrayLike
 from . import util
 from . import load_model
@@ -190,24 +191,19 @@ def extractor(patch:ArrayLike,  # # this is in log!
     
     params = best_corr_model.return_parameters()
 
-    '''
     if do_plot:
-        plot_model(patch, best_corr_model, dev_name, diag_start, diag_stop, params, plot_path)
-    '''
-
-    if do_plot:
-        import seaborn as sns
-        corr_pred = best_corr_model.contact_map_prediction(torch.ones((1, patch.shape[0]), device=dev_name) * 1.0 ).detach().cpu().numpy()   # patch_normalized.shape[0]
-        corr_pred = util.diagonal_normalize(np.log(corr_pred))
-        corr_pred = corr_pred[0]
-        flat_patch = patch.flatten()
-        flat_pred = corr_pred.flatten()
-        patch_correlation = np.corrcoef( flat_patch,flat_pred )[0,1]
-        corr_total_patch = np.triu(patch) + np.tril(corr_pred)
-        plt.figure()
-        plt.matshow( corr_total_patch, cmap='vlag')
-        plt.title(f"corr={patch_correlation:.2f}")
-
+        plot_model(patch, best_corr_model, dev_name, diag_start, patch.size()[1], params, plot_path)
+#        corr_pred = best_corr_model.contact_map_prediction(torch.ones((1, patch.shape[0]), device=dev_name) * 1.0 ).detach().cpu().numpy()   # patch_normalized.shape[0]
+#        corr_pred = util.diagonal_normalize(np.log(corr_pred))
+#        corr_pred = corr_pred[0]
+#        flat_patch = patch.flatten()
+#        flat_pred = corr_pred.flatten()
+#        patch_correlation = np.corrcoef( flat_patch,flat_pred )[0,1]
+#        corr_total_patch = np.triu(patch) + np.tril(corr_pred)
+#        plt.figure()
+#        plt.matshow( corr_total_patch, cmap='vlag')
+#        plt.title(f"corr={patch_correlation:.2f}")
+        
 
     return params, np.max(arr_corr)
 
