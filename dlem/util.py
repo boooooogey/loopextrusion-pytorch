@@ -273,6 +273,7 @@ def train_w_depth(model:Module,
         curr_cor = mat_corr(pred_map[train_ii], data[train_ii])
         
         arr_corr.append(curr_cor.detach().cpu().numpy())
+        
         for diag_i in range(diag_start, diag_end):   # as long as diag_end is not final patch, it works just fine.
         
             # diagonal 1 from data
