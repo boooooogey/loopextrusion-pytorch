@@ -12,6 +12,7 @@ dependencies:
   - numpy <= 1.26.4
   - readline
   - pandas
+  - seaborn
   - einops
   - pybigwig
   - cooler
