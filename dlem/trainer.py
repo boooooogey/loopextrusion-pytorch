@@ -19,7 +19,9 @@ class LitTrainer(L.LightningModule):
                  depth,
                  metric_file_path=None):
         super().__init__()
-        self.save_hyperparameters()
+
+        self.save_hyperparameters(ignore=['model', 'index_diagonal'])
+
         self.model = model
         self.learning_rate = learning_rate
         self.loss = loss
