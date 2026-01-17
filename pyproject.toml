@@ -31,7 +31,7 @@ authors = [
 ]
 description = "Differentiable loop extrusion model"
 readme = "README.md"
-requires-python = ">=3.8"
+requires-python = ">=3.10"
 classifiers = [
     "Programming Language :: Python :: 3",
     "License :: OSI Approved :: MIT License",
@@ -42,6 +42,20 @@ classifiers = [
 Homepage = "https://github.com/boooooogey/loopextrusion-pytorch"
 Issues = "https://github.com/boooooogey/loopextrusion-pytorch/issues"
 
+[tool.setuptools]
+py-modules = []
+
 [project.scripts]
-DLEM = "dlem:dlem_genome"
+DLEM = "dlem.dlem_genome:dlem"
 dlem-inference = "dlem.inference_cli:main"
+[tool.pixi.workspace]
+channels = ["conda-forge"]
+platforms = ["linux-64"]
+
+[tool.setuptools.package-dir]
+"" = "."
+
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true
