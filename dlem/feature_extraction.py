@@ -99,7 +99,7 @@ def extractor(patch:ArrayLike,
               dev_name:str='cuda',
               do_plot:bool=False,
               plot_path:Union[str,None]=None,
-              **kwargs:Any) -> Tuple[Tuple[ArrayLike,ArrayLike],float]:
+              **kwargs:Any) :
     """Extract dlem one-dimensional features from contact maps.
 
     This function takes a contact map represented as a patch and extracts one-dimensional features
@@ -146,4 +146,4 @@ def extractor(patch:ArrayLike,
     params = best_corr_model.return_parameters()
     if do_plot:
         plot_model(patch, best_corr_model, dev_name, diag_start, diag_stop, params, plot_path)
-    return params, np.max(arr_corr)
+    return [params, np.max(arr_corr), best_corr_model]

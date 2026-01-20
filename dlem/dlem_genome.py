@@ -4,6 +4,7 @@ from tqdm import tqdm
 import numpy as np
 import pandas as pd
 import torch
+import os
 from dlem.loader import load_model, load_reader
 from dlem.feature_extraction import extractor
 from dlem.util import diagonal_normalize
@@ -71,7 +72,7 @@ def extract_param_from_mcool(cooler_file:str,
     diag_stop = kwargs.get('diag_stop', 2_000_000 // resolution)
     diag_start = kwargs.get('diag_start', 10_000 // resolution)
 
-    for i, (patch, perc_nan, _, _, _) in tqdm(enumerate(data), total=len(data)):
+    for i, (patch, perc_nan, cur_chr, cur_start, cur_end) in tqdm(enumerate(data), total=len(data)):
         try:
             if perc_nan > perc_nan_threshold:
                 out = ([np.nan] * len(model_tmp.return_parameter_names()), np.nan)
@@ -83,14 +84,14 @@ def extract_param_from_mcool(cooler_file:str,
                                 diag_stop=diag_stop,
                                 loss=weighted_mse,
                                 **kwargs)
-
+                torch.save(out[2].state_dict(), os.path.join(output_path, f"best_loss_{cur_chr}_{cur_start}_{cur_end}.ckpt"))
             chr_arr, start_arr, end_arr, pd_indx = data.return_chrom_positions(i)
 
             results.iloc[pd_indx, 0] = chr_arr
             results.iloc[pd_indx, 1] = start_arr
             results.iloc[pd_indx, 2] = end_arr
             results.iloc[pd_indx, 3] = i
-            results.iloc[pd_indx, 4] = out[-1]
+            results.iloc[pd_indx, 4] = out[1]
             results.iloc[pd_indx, 5] = perc_nan
             for p_i, param in enumerate(out[0]):
                 results.iloc[pd_indx, 6 + p_i] = param
@@ -100,7 +101,7 @@ def extract_param_from_mcool(cooler_file:str,
             break
 
     # Write results dataframe to a given path as a tsv
-    results.to_csv(output_path, sep='\t', index=False)
+    results.to_csv(f'{output_path}/out_params.tsv', sep='\t', index=False)
 
 def parse_arguments():
     """
