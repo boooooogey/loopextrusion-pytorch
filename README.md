@@ -12,9 +12,6 @@ conda activate dlem
 pip install -e .
 ```
 
-## Prepare Input Data
-We can either have a repository for data or have a script for downloading files
-
 
 ## Usage
 Deep dLEM model predicts Hi-C/Micro-C contact map structure from sequence and epigenomic features. The following provides example commands for training and doing inference with the deep dLEM model.
@@ -84,10 +81,14 @@ dlem-inference \
 - `device`: Torch device to use (e.g. 'cpu', 'cuda', or 'cuda:0').
 - `bigwig-pooling`: Optional pooling resolution passed to bigWig reader. Default: no pooling.
 
+#### Feature tracks data downloading
+The example feature tracks data for performing dLEM inference are available on [zenodo](https://doi.org/10.5281/zenodo.18633326). This includes DNase tracks for H1 and HFF cell types and directional CTCF matches as sequence features. 
+
+An example model checkpoint file can be found under `./model_checkpoint/`.
 
 ## How to cite
 
 If you use dLEM or any of its language bindings in your research, please cite the following publication:
 
-Tina Subic, Tŭgrul Balcı, Kristina Perevoshchikova, Geoffrey Fudenberg, Maria Chikina, Mechanistic Genome Folding at Scale through the Differentiable Loop Extrusion Model
-_Biorxiv_, [https://www.biorxiv.org/content/10.1101/2025.10.17.682904v1](https://www.biorxiv.org/content/10.1101/2025.10.17.682904v1)
+Tina Subic, Ali Tŭgrul Balcı, Kristina Perevoshchikova, Diego Borges-Rivera, Jieni Hu, Geoffrey Fudenberg, Jacqueline Dresch, Maria Chikina, Mechanistic Genome Folding at Scale through the Differentiable Loop Extrusion Model
+_Biorxiv_, [https://www.biorxiv.org/content/10.1101/2025.10.17.682904v2](https://www.biorxiv.org/content/10.1101/2025.10.17.682904v2)
